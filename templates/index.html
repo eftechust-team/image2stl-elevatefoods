@@ -1970,24 +1970,24 @@
                     cropRect.bottom - cropRect.top,
                     0,
                     0,
-                    let editedDataUrl = outputCanvas.toDataURL('image/png');
+                    sourceWidth,
                     sourceHeight
-
-                    try {
-                        const extractedDataUrl = await extractMainSubjectDataUrl(editedDataUrl);
-                        if (extractedDataUrl) {
-                            editedDataUrl = extractedDataUrl;
-                        }
-                    } catch (extractionError) {
-                        console.warn('Main subject extraction failed; using the edited image directly.', extractionError);
-                    }
                 );
             } else {
                 outputCtx.drawImage(uploadEditorImage, 0, 0, sourceWidth, sourceHeight);
             }
 
             outputCtx.filter = 'none';
-            const editedDataUrl = outputCanvas.toDataURL('image/png');
+            let editedDataUrl = outputCanvas.toDataURL('image/png');
+            try {
+                const extractedDataUrl = await extractMainSubjectDataUrl(editedDataUrl);
+                if (extractedDataUrl) {
+                    editedDataUrl = extractedDataUrl;
+                }
+            } catch (extractionError) {
+                console.warn('Main subject extraction failed; using the edited image directly.', extractionError);
+            }
+
             const originalDataUrl = uploadEditorOriginalDataUrl || editedDataUrl;
 
             const comparePanel = document.getElementById('uploadComparePanel');
