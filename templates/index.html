@@ -792,6 +792,21 @@
             border-radius: 10px;
         }
 
+        .group-selection-grid,
+        .color-selection-grid {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 12px;
+            justify-content: center;
+        }
+
+        .group-selection-grid .group-choice-btn,
+        .color-selection-grid .color-choice-btn {
+            flex: 1 1 96px;
+            max-width: 128px;
+            min-height: 48px;
+        }
+
         .upload-editor-actions .danger-btn {
             background: #e2e8f0;
             color: #1f2937;
@@ -1016,6 +1031,27 @@
                 padding: 10px 12px;
                 font-size: 13px;
             }
+
+            .group-selection-grid,
+            .color-selection-grid {
+                gap: 10px;
+            }
+
+            .group-selection-grid .group-choice-btn,
+            .color-selection-grid .color-choice-btn {
+                flex: 1 1 calc(50% - 10px);
+                max-width: none;
+                min-height: 44px;
+                padding: 10px 12px !important;
+                font-size: 14px !important;
+                border-radius: 10px !important;
+            }
+
+            .upload-editor-actions button {
+                flex: 1 1 120px;
+                padding: 9px 11px;
+                font-size: 12px;
+            }
         }
 
         @media (max-width: 520px) {
@@ -1110,8 +1146,29 @@
             .upload-editor-actions button {
                 flex: 1 1 100%;
                 width: 100%;
+                padding: 8px 10px;
+                font-size: 11px;
+            }
+
+            .group-selection-grid,
+            .color-selection-grid {
+                gap: 8px;
+            }
+
+            .group-selection-grid .group-choice-btn,
+            .color-selection-grid .color-choice-btn {
+                flex: 1 1 calc(50% - 8px);
+                max-width: none;
+                min-height: 42px;
+                padding: 8px 10px !important;
+                font-size: 13px !important;
+                border-radius: 10px !important;
+            }
+
+            #generateColorStlBtn {
+                width: 100%;
                 padding: 10px 12px;
-                font-size: 12px;
+                font-size: 13px;
             }
         }
     </style>
@@ -1136,7 +1193,7 @@
             <div class="info-box" style="background: #fff4dd; border-left-color: #d98d2a; margin-bottom: 15px;">
                 <p style="margin: 0; color: #7b4d17; font-weight: 700;">Please select your group number before continuing.</p>
             </div>
-            <div style="display: flex; flex-wrap: wrap; gap: 12px; justify-content: center;">
+            <div class="group-selection-grid">
                 <button type="button" class="group-choice-btn" data-group="1" style="min-width: 64px; min-height: 48px; padding: 12px 18px; border: 2px solid #d98d2a; border-radius: 12px; background: linear-gradient(135deg, #fff7ec 0%, #f4d8a8 100%); color: #5a3415; font-weight: 800; font-size: 16px; cursor: pointer; box-shadow: 0 4px 10px rgba(180, 118, 34, 0.18); transition: all 0.2s ease;">1</button>
                 <button type="button" class="group-choice-btn" data-group="2" style="min-width: 64px; min-height: 48px; padding: 12px 18px; border: 2px solid #d98d2a; border-radius: 12px; background: linear-gradient(135deg, #fff7ec 0%, #f4d8a8 100%); color: #5a3415; font-weight: 800; font-size: 16px; cursor: pointer; box-shadow: 0 4px 10px rgba(180, 118, 34, 0.18); transition: all 0.2s ease;">2</button>
                 <button type="button" class="group-choice-btn" data-group="3" style="min-width: 64px; min-height: 48px; padding: 12px 18px; border: 2px solid #d98d2a; border-radius: 12px; background: linear-gradient(135deg, #fff7ec 0%, #f4d8a8 100%); color: #5a3415; font-weight: 800; font-size: 16px; cursor: pointer; box-shadow: 0 4px 10px rgba(180, 118, 34, 0.18); transition: all 0.2s ease;">3</button>
@@ -1164,7 +1221,6 @@
                         <input class="file-picker-input" type="file" id="uploadImageInput" accept="image/*">
                         <label class="file-picker-btn" for="uploadImageInput">Choose File</label>
                     </div>
-                    <button id="uploadImageBtn" class="file-picker-btn" type="button" style="min-height: 46px;">Take Photo</button>
                 </div>
                 <div id="uploadStatus" class="status" style="margin-top: 0; display: block;">Take a photo or upload an image to extract the main subject.</div>
                 <div id="uploadComparePanel" class="upload-compare-panel"></div>
@@ -1231,7 +1287,7 @@
                 <div class="info-box" style="background: #fff5e9; border-left-color: #d98d2a; margin-bottom: 15px;">
                     <p style="margin: 0; color: #6d4317; font-weight: 700;">Choose one color for the STL output.</p>
                 </div>
-                <div class="controls" style="display:flex; gap:12px; align-items:center; flex-wrap:nowrap; justify-content:center;">
+                <div class="controls color-selection-grid" style="display:flex; gap:12px; align-items:center; flex-wrap:nowrap; justify-content:center;">
                     <button type="button" class="color-choice-btn" data-color="white" style="background:#f8fafc; color:#1f2937; border:2px solid #dbe1ea; padding:10px 16px; border-radius:10px; font-weight:700;">White</button>
                     <button type="button" class="color-choice-btn" data-color="pink" style="background:#fdf2f8; color:#7c2d12; border:2px solid #f9a8d4; padding:10px 16px; border-radius:10px; font-weight:700;">Pink</button>
                     <button type="button" class="color-choice-btn" data-color="purple" style="background:#f5f3ff; color:#4c1d95; border:2px solid #c4b5fd; padding:10px 16px; border-radius:10px; font-weight:700;">Purple</button>
@@ -1447,24 +1503,6 @@
         </div>
     </div>
 
-    <div id="cameraCaptureOverlay" class="camera-capture-overlay" style="display:none;">
-        <div class="camera-capture-modal">
-            <div class="camera-capture-header">
-                <h2>Take a Photo</h2>
-                <button id="cameraCaptureCloseBtn" type="button" class="danger-btn">Close</button>
-            </div>
-            <div class="camera-capture-body">
-                <video id="cameraPreviewVideo" autoplay playsinline muted></video>
-                <canvas id="cameraCaptureCanvas" width="1280" height="960" style="display:none;"></canvas>
-            </div>
-            <div class="camera-capture-actions">
-                <button id="cameraRetakeBtn" type="button" class="danger-btn" style="display:none;">Retake</button>
-                <button id="cameraTakePhotoBtn" type="button" style="background:#27ae60;">Take Photo</button>
-                <button id="cameraUsePhotoBtn" type="button" style="display:none; background:#27ae60;">Use Photo</button>
-            </div>
-        </div>
-    </div>
-
     <script>
         let selectedImage = null;
         let selectedGroupNumber = null;
@@ -1486,8 +1524,6 @@
         let uploadEditorFile = null;
         let uploadEditorImage = null;
         let uploadEditorOriginalDataUrl = null;
-        let cameraStream = null;
-        let cameraCapturedDataUrl = null;
         let selectionToolCleanup = null;
         let uploadEditorState = {
             brightness: 0,
@@ -1550,12 +1586,10 @@
             hideUploadEditor();
         }
 
-        // Disable/enable upload controls (Choose File / Take Photo)
+        // Disable/enable upload controls (Choose File)
         function setUploadControlsEnabled(enabled) {
-            const uploadBtn = document.getElementById('uploadImageBtn');
             const uploadInput = document.getElementById('uploadImageInput');
             const filePickerLabel = document.querySelector('#uploadImageInput + label.file-picker-btn');
-            if (uploadBtn) uploadBtn.disabled = !enabled;
             if (uploadInput) uploadInput.disabled = !enabled;
             if (filePickerLabel) {
                 if (!enabled) filePickerLabel.classList.add('disabled');
@@ -1940,154 +1974,19 @@
             }
         }
 
-        function stopCameraStream() {
-            if (cameraStream) {
-                cameraStream.getTracks().forEach((track) => track.stop());
-                cameraStream = null;
-            }
-            const video = document.getElementById('cameraPreviewVideo');
-            if (video) {
-                video.pause();
-                video.srcObject = null;
-            }
-        }
-
-        function closeCameraCapture() {
-            stopCameraStream();
-            const overlay = document.getElementById('cameraCaptureOverlay');
-            if (overlay) {
-                overlay.style.display = 'none';
-            }
-            const takeBtn = document.getElementById('cameraTakePhotoBtn');
-            const useBtn = document.getElementById('cameraUsePhotoBtn');
-            const retakeBtn = document.getElementById('cameraRetakeBtn');
-            if (takeBtn) takeBtn.style.display = 'inline-block';
-            if (useBtn) useBtn.style.display = 'none';
-            if (retakeBtn) retakeBtn.style.display = 'none';
-            cameraCapturedDataUrl = null;
-        }
-
-        async function openCameraCapture() {
-            if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
-                alert('This browser does not support camera capture. Please use Choose File instead.');
-                return;
-            }
-            if (!selectedGroupNumber) {
-                alert('Please choose your group number before continuing.');
-                const groupSection = document.getElementById('groupSelectionSection');
-                if (groupSection) {
-                    groupSection.scrollIntoView({ behavior: 'smooth', block: 'start' });
-                }
-                return;
-            }
-
-            const overlay = document.getElementById('cameraCaptureOverlay');
-            if (overlay) overlay.style.display = 'flex';
-
-            const status = document.getElementById('uploadStatus');
-            if (status) {
-                status.style.display = 'block';
-                status.textContent = 'Camera ready. Take the photo and confirm it.';
-            }
-
-            try {
-                stopCameraStream();
-                const stream = await navigator.mediaDevices.getUserMedia({
-                    video: {
-                        facingMode: { ideal: 'environment' },
-                        width: { ideal: 1280 },
-                        height: { ideal: 960 }
-                    },
-                    audio: false
-                });
-                cameraStream = stream;
-                const video = document.getElementById('cameraPreviewVideo');
-                if (video) {
-                    video.srcObject = stream;
-                    await video.play();
-                }
-                const takeBtn = document.getElementById('cameraTakePhotoBtn');
-                const useBtn = document.getElementById('cameraUsePhotoBtn');
-                const retakeBtn = document.getElementById('cameraRetakeBtn');
-                if (takeBtn) takeBtn.style.display = 'inline-block';
-                if (useBtn) useBtn.style.display = 'none';
-                if (retakeBtn) retakeBtn.style.display = 'none';
-            } catch (error) {
-                console.error('Camera access error:', error);
-                closeCameraCapture();
-                alert('Camera access was blocked or unavailable. Please use Choose File instead.');
-            }
-        }
-
-        function captureCameraPhoto() {
-            const video = document.getElementById('cameraPreviewVideo');
-            const canvas = document.getElementById('cameraCaptureCanvas');
-            if (!video || !canvas) return;
-
-            const width = video.videoWidth || 1280;
-            const height = video.videoHeight || 960;
-            canvas.width = width;
-            canvas.height = height;
-            const ctx = canvas.getContext('2d');
-            ctx.drawImage(video, 0, 0, width, height);
-            cameraCapturedDataUrl = canvas.toDataURL('image/png');
-
-            const takeBtn = document.getElementById('cameraTakePhotoBtn');
-            const useBtn = document.getElementById('cameraUsePhotoBtn');
-            const retakeBtn = document.getElementById('cameraRetakeBtn');
-            if (takeBtn) takeBtn.style.display = 'none';
-            if (useBtn) useBtn.style.display = 'inline-block';
-            if (retakeBtn) retakeBtn.style.display = 'inline-block';
-        }
-
-        async function confirmCameraPhoto() {
-            if (!cameraCapturedDataUrl) {
-                alert('Please take a photo first.');
-                return;
-            }
-            closeCameraCapture();
-
-            const status = document.getElementById('uploadStatus');
-            if (status) {
-                status.style.display = 'block';
-                status.textContent = 'Opening the image editor...';
-            }
-
-            const fileName = `camera_capture_${Date.now()}.png`;
-            const dataUri = cameraCapturedDataUrl;
-            const byteString = atob(dataUri.split(',')[1]);
-            const bytes = new Uint8Array(byteString.length);
-            for (let i = 0; i < byteString.length; i++) {
-                bytes[i] = byteString.charCodeAt(i);
-            }
-            const blob = new Blob([bytes], { type: 'image/png' });
-            const file = new File([blob], fileName, { type: 'image/png' });
-            await openUploadEditorFromFile(file, 'Opening camera');
-        }
-
         document.addEventListener('DOMContentLoaded', () => {
             // Initialize state but don't show Step 2 until a group is selected
             resetWorkflowStateForNewImageSource();
 
-            const uploadInput = document.getElementById('uploadImageInput');
             const filePickerLabel = document.querySelector('#uploadImageInput + label.file-picker-btn');
             const launchUploadEditor = async (file, sourceLabel) => {
                 if (!file) return;
-
-                if (!selectedGroupNumber) {
-                    alert('Please choose your group number before continuing.');
-                    const groupSection = document.getElementById('groupSelectionSection');
-                    if (groupSection) {
-                        groupSection.scrollIntoView({ behavior: 'smooth', block: 'start' });
-                    }
                     if (uploadInput) uploadInput.value = '';
                     if (filePickerLabel) filePickerLabel.textContent = 'Choose File';
                     return;
                 }
 
                 const status = document.getElementById('uploadStatus');
-                const uploadBtn = document.getElementById('uploadImageBtn');
-                uploadBtn.disabled = true;
                 status.style.display = 'block';
                 status.textContent = `${sourceLabel || 'Opening'} the image editor...`;
 
@@ -2145,32 +2044,6 @@
                     try { uploadPanel.scrollIntoView({ behavior: 'smooth', block: 'start' }); } catch (e) {}
                 });
             });
-        });
-
-        document.getElementById('uploadImageBtn').addEventListener('click', () => {
-            openCameraCapture();
-        });
-
-        document.getElementById('cameraCaptureCloseBtn').addEventListener('click', () => {
-            closeCameraCapture();
-        });
-
-        document.getElementById('cameraTakePhotoBtn').addEventListener('click', () => {
-            captureCameraPhoto();
-        });
-
-        document.getElementById('cameraRetakeBtn').addEventListener('click', () => {
-            cameraCapturedDataUrl = null;
-            const takeBtn = document.getElementById('cameraTakePhotoBtn');
-            const useBtn = document.getElementById('cameraUsePhotoBtn');
-            const retakeBtn = document.getElementById('cameraRetakeBtn');
-            if (takeBtn) takeBtn.style.display = 'inline-block';
-            if (useBtn) useBtn.style.display = 'none';
-            if (retakeBtn) retakeBtn.style.display = 'none';
-        });
-
-        document.getElementById('cameraUsePhotoBtn').addEventListener('click', async () => {
-            await confirmCameraPhoto();
         });
 
         document.getElementById('uploadBrightness').addEventListener('input', (event) => {
