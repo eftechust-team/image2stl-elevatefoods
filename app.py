@@ -49,9 +49,16 @@ http_session.mount('http://', http_adapter)
 # After logging in with your AK/SK, generate an API Key in the Ark console
 DOUBAO_API_URL = "https://ark.cn-beijing.volces.com/api/v3/images/generations"
 API_KEY = os.getenv("DOUBAO_API_KEY", "")
-SUPABASE_URL = os.getenv('SUPABASE_URL', '').strip().rstrip('/')
-SUPABASE_SERVICE_ROLE_KEY = os.getenv('SUPABASE_SERVICE_ROLE_KEY', '').strip()
-SUPABASE_STORAGE_BUCKET = os.getenv('SUPABASE_STORAGE_BUCKET', 'gen-stl-zip').strip()
+def clean_env_value(value):
+    value = str(value or '').strip()
+    if len(value) >= 2 and value[0] == value[-1] and value[0] in ('"', "'"):
+        value = value[1:-1].strip()
+    return value
+
+
+SUPABASE_URL = clean_env_value(os.getenv('SUPABASE_URL', '')).rstrip('/')
+SUPABASE_SERVICE_ROLE_KEY = clean_env_value(os.getenv('SUPABASE_SERVICE_ROLE_KEY', ''))
+SUPABASE_STORAGE_BUCKET = clean_env_value(os.getenv('SUPABASE_STORAGE_BUCKET', 'gen-stl-zip'))
 SUPABASE_UPLOAD_TIMEOUT = float(os.getenv('SUPABASE_UPLOAD_TIMEOUT', '30'))
 
 

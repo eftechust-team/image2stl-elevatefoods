@@ -28,6 +28,7 @@ Generate multi-layer STL files from AI-generated black-and-white images with las
 	$env:SUPABASE_SERVICE_ROLE_KEY="<service-role-key>"
 	$env:SUPABASE_STORAGE_BUCKET="gen-stl-zip"
 	```
+	Paste the raw service-role key value from Supabase here. Do not wrap it in extra quotes or add spaces/newlines.
 4. Start the app:
 	```bash
 	python app.py
@@ -60,6 +61,7 @@ Steps:
 - Render will detect `render.yaml` and configure the service.
 - Set `DOUBAO_API_KEY` in the service’s Environment tab (as a Secret).
 - Set Supabase variables (`SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY`, `SUPABASE_STORAGE_BUCKET`) if you want automatic cloud uploads.
+- Paste the raw `SUPABASE_SERVICE_ROLE_KEY` value from Supabase. If the key was copied with quotes or line breaks, upload auth can fail with `InvalidCompactJWS`.
 - Deploy. Auto-deploy is enabled.
 
 ## Notes
