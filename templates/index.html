@@ -1857,6 +1857,59 @@
             });
         }
 
+        function dataUrlToBlob(dataUrl) {
+            const parts = String(dataUrl || '').split(',');
+            if (parts.length < 2) {
+                throw new Error('Invalid image data.');
+            }
+
+            const header = parts[0] || '';
+            const base64Data = parts[1] || '';
+            const mimeMatch = header.match(/data:([^;]+);base64/i);
+            const contentType = mimeMatch ? mimeMatch[1] : 'image/png';
+            const byteCharacters = atob(base64Data);
+            const byteArrays = [];
+
+            for (let offset = 0; offset < byteCharacters.length; offset += 512) {
+                const slice = byteCharacters.slice(offset, offset + 512);
+                const byteNumbers = new Array(slice.length);
+                for (let i = 0; i < slice.length; i++) {
+                    byteNumbers[i] = slice.charCodeAt(i);
+                }
+                byteArrays.push(new Uint8Array(byteNumbers));
+            }
+
+            return new Blob(byteArrays, { type: contentType });
+        }
+
+        async function extractMainSubjectDataUrl(dataUrl) {
+            const formData = new FormData();
+            formData.append('image', dataUrlToBlob(dataUrl), 'upload.png');
+
+            const response = await fetch('/process_uploaded_image', {
+                method: 'POST',
+                body: formData
+            });
+
+            const responseText = await response.text();
+            let data = null;
+            try {
+                data = responseText ? JSON.parse(responseText) : null;
+            } catch (parseError) {
+                throw new Error(responseText || `Server returned ${response.status}`);
+            }
+
+            if (!response.ok) {
+                throw new Error((data && data.error) ? data.error : responseText || `Server returned ${response.status}`);
+            }
+
+            if (!data || !data.image) {
+                throw new Error('No extracted image was returned.');
+            }
+
+            return `data:image/png;base64,${data.image}`;
+        }
+
         async function openUploadEditorFromFile(file) {
             uploadEditorFile = file;
             uploadEditorOriginalDataUrl = null;
@@ -1917,8 +1970,17 @@
                     cropRect.bottom - cropRect.top,
                     0,
                     0,
-                    sourceWidth,
+                    let editedDataUrl = outputCanvas.toDataURL('image/png');
                     sourceHeight
+
+                    try {
+                        const extractedDataUrl = await extractMainSubjectDataUrl(editedDataUrl);
+                        if (extractedDataUrl) {
+                            editedDataUrl = extractedDataUrl;
+                        }
+                    } catch (extractionError) {
+                        console.warn('Main subject extraction failed; using the edited image directly.', extractionError);
+                    }
                 );
             } else {
                 outputCtx.drawImage(uploadEditorImage, 0, 0, sourceWidth, sourceHeight);
