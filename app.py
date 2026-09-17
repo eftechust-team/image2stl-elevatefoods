@@ -24,7 +24,7 @@ app.config['SESSION_COOKIE_HTTPONLY'] = True
 app.config['SESSION_COOKIE_SAMESITE'] = 'Lax'
 
 MAX_IMAGES_PER_SESSION = int(os.getenv('MAX_IMAGES_PER_SESSION', '4'))
-MAX_CONCURRENT_REQUESTS = max(1, int(os.getenv('MAX_CONCURRENT_REQUESTS', '2')))
+MAX_CONCURRENT_REQUESTS = max(1, int(os.getenv('MAX_CONCURRENT_REQUESTS', '20')))
 DOUBAO_REQUEST_TIMEOUT = float(os.getenv('DOUBAO_REQUEST_TIMEOUT', '90'))
 request_gate = threading.BoundedSemaphore(MAX_CONCURRENT_REQUESTS)
 http_session = requests.Session()
@@ -170,7 +170,7 @@ def extract_main_subject_image(image):
     except Exception:
         ink_floor = 80.0
 
-    foreground_threshold = int(min(170, max(75, ink_floor + 55.0)))
+    foreground_threshold = int(min(180, max(80, ink_floor + 60.0)))
     dark_mask = gray_array < foreground_threshold
 
     # Remove isolated specks only; do not close gaps or fill holes.
@@ -179,7 +179,7 @@ def extract_main_subject_image(image):
 
     # If the mask is still too broad, tighten it once more instead of filling.
     if np.mean(dark_mask) > 0.45:
-        foreground_threshold = int(max(65, foreground_threshold - 25))
+        foreground_threshold = int(max(70, foreground_threshold - 25))
         dark_mask = gray_array < foreground_threshold
         dark_mask = ndimage.binary_opening(dark_mask, structure=np.ones((2, 2)))
 
@@ -283,18 +283,97 @@ def fast_generate_stl():
         width, height = image.size
         
         # Extract selected pixels (black/dark areas drawn by user)
-        # Darker pixels (< 128) = user selection, lighter pixels (> 128) = background
         image_array = np.array(image)
-        mask_array = image_array < 128  # Select BLACK/dark pixels (user drawn areas)
-        
-        # Generate STL using grid-based algorithm (cleaner topology, faster repair)
-        stl_content = generate_stl_from_grid(
-            mask_array,
-            width,
-            height,
-            z_offset=0,
-            thickness=height_mm
-        )
+        # Use a conservative threshold to capture true black strokes while avoiding filling small gaps
+        mask_array = image_array < 128
+        # Remove isolated specks but do not perform closing/filling to preserve holes and thin structures
+        mask_array = ndimage.binary_opening(mask_array, structure=np.ones((3, 3)))
+
+        # Try shapely+trimesh extrusion first (pure-Python), then OpenSCAD, then marching-cubes fallback
+        stl_content = None
+        try:
+            stl_content = generate_stl_via_shapely(mask_array, width, height, z_offset=0, thickness=height_mm, target_width_mm=50.0)
+        except Exception as e:
+            print('generate_stl_via_shapely failed:', e)
+
+        if not stl_content:
+            try:
+                stl_content = generate_stl_via_openscad(mask_array, width, height, z_offset=0, thickness=height_mm, target_width_mm=50.0)
+            except Exception as e:
+                print('generate_stl_via_openscad failed:', e)
+
+        if not stl_content:
+            # Fallback to marching cubes-based generator (watertight voxel extrusion)
+            stl_content = generate_stl_marching_cubes(
+                mask_array,
+                width,
+                height,
+                z_offset=0,
+                thickness=height_mm
+            )
+        # Attempt automatic repair if STL is not watertight and trimesh is available
+        try:
+            import trimesh
+            import tempfile
+            import pathlib
+
+            def try_repair_mesh(mesh):
+                try:
+                    mesh.remove_duplicate_faces()
+                except Exception:
+                    pass
+                try:
+                    mesh.remove_degenerate_faces()
+                except Exception:
+                    pass
+                try:
+                    trimesh.repair.fix_normals(mesh)
+                except Exception:
+                    pass
+                try:
+                    trimesh.repair.fill_holes(mesh)
+                except Exception:
+                    pass
+                try:
+                    mesh.merge_vertices()
+                except Exception:
+                    pass
+                try:
+                    mesh.remove_unreferenced_vertices()
+                except Exception:
+                    pass
+                try:
+                    trimesh.repair.fix_winding(mesh)
+                except Exception:
+                    pass
+                return mesh
+
+            # write current stl to temp file and load
+            tmpdir = tempfile.mkdtemp(prefix='stl_repair_')
+            tmp_in = pathlib.Path(tmpdir) / 'candidate.stl'
+            tmp_in.write_text(stl_content, encoding='utf-8')
+            mesh = trimesh.load(str(tmp_in), force='mesh')
+
+            if not getattr(mesh, 'is_watertight', False):
+                mesh = try_repair_mesh(mesh)
+
+            if getattr(mesh, 'is_watertight', False):
+                stl_content = mesh.export(file_type='stl_ascii')
+            else:
+                # Final fallback: regenerate via high-res marching cubes from the original mask
+                try:
+                    fallback_stl = generate_stl_marching_cubes(mask_array, width, height, z_offset=0, thickness=height_mm, max_dim=1024)
+                    if fallback_stl:
+                        tmp_in.write_text(fallback_stl, encoding='utf-8')
+                        mesh2 = trimesh.load(str(tmp_in), force='mesh')
+                        mesh2 = try_repair_mesh(mesh2)
+                        if getattr(mesh2, 'is_watertight', False):
+                            stl_content = mesh2.export(file_type='stl_ascii')
+                except Exception:
+                    pass
+        except Exception:
+            # trimesh not available or repair failed; continue with original stl
+            pass
         
         # Return STL directly (no ZIP for single file)
         download_name = sanitize_storage_filename(data.get('download_name') or 'model.stl')
@@ -521,28 +600,40 @@ def triangulate_with_holes(outer_verts, hole_verts_list):
     outer_verts: (N,2) CCW array (row=y_image, col=x_image)
     hole_verts_list: list of (M,2) CW arrays
     """
+    # Build rings array: outer first, then holes
     rings = [outer_verts] + hole_verts_list
-    # Build combined (x, y) array for earcut — earcut uses (x, y) coords
-    # Our points are (row, col) = (y_img, x_img), so col=x, row=y
-    coords = []
-    ring_ends = []
-    offset = 0
-    for ring in rings:
-        for pt in ring:
-            coords.append([float(pt[1]), float(pt[0])])  # [x, y]
-        offset += len(ring)
-        ring_ends.append(offset)
 
-    all_xy = np.array(coords, dtype=np.float64)
-    ring_ends_np = np.array(ring_ends, dtype=np.uint32)
+    # Build flattened coordinate array for earcut: [x0,y0,x1,y1,...]
+    coords_flat = []
+    hole_start_indices = []
+    vertex_count = 0
+    for idx, ring in enumerate(rings):
+        # For holes (idx > 0), record the starting vertex index
+        if idx > 0:
+            hole_start_indices.append(vertex_count)
+        for pt in ring:
+            # pt is (row=y, col=x) -> earcut wants (x, y)
+            coords_flat.append(float(pt[1]))
+            coords_flat.append(float(pt[0]))
+        vertex_count += len(ring)
+
+    coords_np = np.array(coords_flat, dtype=np.float64)
+    if len(hole_start_indices) > 0:
+        holes_np = np.array(hole_start_indices, dtype=np.uint32)
+    else:
+        holes_np = None
 
     try:
-        triangles_flat = earcut.triangulate_float64(all_xy, ring_ends_np)
+        # earcut expects a flat coordinate array and optional hole indices
+        if holes_np is not None and len(holes_np) > 0:
+            triangles_flat = earcut.triangulate_float64(coords_np, holes_np)
+        else:
+            triangles_flat = earcut.triangulate_float64(coords_np)
     except Exception as ex:
         print(f"  earcut error: {ex}")
         return [], np.vstack(rings)
 
-    if len(triangles_flat) == 0 or len(triangles_flat) % 3 != 0:
+    if triangles_flat is None or len(triangles_flat) == 0 or len(triangles_flat) % 3 != 0:
         return [], np.vstack(rings)
 
     tris = [(int(triangles_flat[i]), int(triangles_flat[i+1]), int(triangles_flat[i+2]))
@@ -562,8 +653,8 @@ def generate_hollow_shell_stl(mask_array, width, height, z_offset, thickness):
     
     stl_lines = ["solid layer\n"]
     z_top = z_offset + thickness
-    # Scale to fit model within ~50mm if image is ~100 pixels; adjust by actual dimensions
-    scale = 80.0 / max(width, height)
+    # Scale to fit model within ~50mm max dimension
+    scale = 50.0 / max(width, height)
     
     try:
         # Smooth the mask slightly to avoid jagged edges
@@ -732,7 +823,7 @@ def generate_stl_from_contours(mask_array, width, height, z_offset, thickness, a
     upsample_factor = min(2, aa_upsample) if aa_enabled else 1
     # Scale to fit model within ~10mm if image is ~100 pixels; adjust by actual dimensions
     # This ensures position and size are correct relative to image dimensions
-    base_scale = 80.0 / max(width, height)  # Scale to ~80mm for a typical image
+    base_scale = 50.0 / max(width, height)  # Scale so max dimension is ~50mm
     scale = base_scale / max(1, upsample_factor)
     stl_lines = ["solid layer\n"]
 
@@ -1206,7 +1297,7 @@ def generate_stl_from_grid(mask_array, width, height, z_offset, thickness):
     # Check for entire canvas selected (all True) - handle as special case
     if np.all(mask_array):
         # Entire canvas is selected - create a simple rectangular solid
-        scale = 80.0 / max(width, height)
+        scale = 50.0 / max(width, height)
         z_top = z_offset + thickness
         stl_lines = ["solid layer\n"]
         
@@ -1271,7 +1362,7 @@ def generate_stl_from_grid(mask_array, width, height, z_offset, thickness):
                     holes_for_i.append(j)
             outer_with_holes.append((i, holes_for_i))
         
-        scale = 80.0 / max(width, height)
+        scale = 50.0 / max(width, height)
         z_top = z_offset + thickness
         stl_lines = ["solid layer\n"]
         
@@ -1776,6 +1867,494 @@ def create_triangle(v1, v2, v3):
         f"    endloop\n"
         f"  endfacet\n"
     )
+
+
+def generate_stl_marching_cubes(mask_array, width, height, z_offset, thickness, max_dim=512):
+    """Generate a watertight STL by extruding the 2D mask into a 3D voxel volume
+    and running marching cubes. This produces manifold geometry and consistent
+    normals, avoiding earcut/triangulation edge mismatches.
+    """
+    # If mask empty
+    if not np.any(mask_array):
+        return "solid layer\nendsolid layer\n"
+
+    # Downscale if very large to keep marching cubes manageable
+    h, w = mask_array.shape
+    scale_factor = 1.0
+    if max(w, h) > max_dim:
+        scale_factor = float(max_dim) / float(max(w, h))
+        import skimage.transform as sk_transform
+        mask_small = sk_transform.resize(mask_array.astype(float), (
+            int(round(h * scale_factor)), int(round(w * scale_factor))
+        ), order=0, preserve_range=True) > 0.5
+    else:
+        mask_small = mask_array.astype(bool)
+
+    hs, ws = mask_small.shape
+
+    # Depth resolution: aim for ~2 voxels per mm of thickness
+    try:
+        depth = max(4, min(64, int(round(thickness * 2))))
+    except Exception:
+        depth = 10
+
+    # Build 3D volume with axes (z, y, x)
+    vol = np.zeros((depth, hs, ws), dtype=np.uint8)
+    for z in range(depth):
+        vol[z, :, :] = mask_small
+
+    # Smooth volume slightly to avoid aliasing artifacts
+    vol_float = vol.astype(float)
+    vol_float = ndimage.gaussian_filter(vol_float, sigma=(0.5, 0.5, 0.5))
+
+    # Run marching cubes at level 0.5
+    try:
+        verts, faces, normals, values = measure.marching_cubes(vol_float, level=0.5, spacing=(thickness / depth, 1.0, 1.0))
+    except Exception as e:
+        print(f"marching_cubes failed: {e}")
+        return generate_stl_from_grid(mask_array, width, height, z_offset, thickness)
+
+    # verts are in (z, y, x) coordinates per spacing above
+    # Map to mm-space: x_mm = x * scale_mm, y_mm = (height_pixels - y_scaled) * scale_mm, z_mm = z + z_offset
+    # Compute XY pixel-to-mm scale from original size (we used optional downscale)
+    scale_mm = 50.0 / max(width, height)
+    # If we downscaled, adjust x/y coordinates
+    if scale_factor != 1.0:
+        inv_sf = 1.0 / scale_factor
+    else:
+        inv_sf = 1.0
+
+    stl_lines = ["solid layer\n"]
+
+    for f in faces:
+        i0, i1, i2 = int(f[0]), int(f[1]), int(f[2])
+        v0 = verts[i0]
+        v1 = verts[i1]
+        v2 = verts[i2]
+
+        # verts: [z, y, x]
+        def to_mm(v):
+            z_vox, y_pix, x_pix = v
+            x_mm = float(x_pix) * inv_sf * scale_mm
+            y_mm = float((hs - y_pix - 1)) * inv_sf * scale_mm
+            z_mm = float(z_vox) + z_offset
+            # convert z voxel units to mm: spacing used thickness/depth
+            z_mm = z_mm * (thickness / depth)
+            return [x_mm, y_mm, z_mm]
+
+        vv0 = to_mm(v0)
+        vv1 = to_mm(v1)
+        vv2 = to_mm(v2)
+
+        # Use given normals for orientation; ensure triangle winding matches normal
+        nx, ny, nz = normals[i0]
+        # Compute triangle normal to test orientation
+        ax = vv1[0] - vv0[0]
+        ay = vv1[1] - vv0[1]
+        az = vv1[2] - vv0[2]
+        bx = vv2[0] - vv0[0]
+        by = vv2[1] - vv0[1]
+        bz = vv2[2] - vv0[2]
+        cx = ay * bz - az * by
+        cy = az * bx - ax * bz
+        cz = ax * by - ay * bx
+        # Dot with provided normal to check sign
+        dot = cx * nx + cy * ny + cz * nz
+        if dot < 0:
+            # flip winding
+            tri = create_triangle(vv0, vv2, vv1)
+        else:
+            tri = create_triangle(vv0, vv1, vv2)
+
+        if tri:
+            stl_lines.append(tri)
+
+    stl_lines.append("endsolid layer\n")
+    return ''.join(stl_lines)
+
+
+def generate_stl_via_openscad(mask_array, width, height, z_offset, thickness, target_width_mm=50.0):
+    """Generate STL by converting mask -> cleaned contours -> SVG -> OpenSCAD linear_extrude.
+    Falls back cleanly if OpenSCAD or cv2/trimesh aren't available.
+    """
+    import tempfile
+    import pathlib
+    import subprocess
+
+    # Try to use cv2 if available for robust contour extraction
+    try:
+        import cv2
+    except Exception:
+        cv2 = None
+
+    try:
+        import trimesh
+    except Exception:
+        trimesh = None
+
+    # Prepare binary image (uint8 0/255)
+    mask_img = (mask_array.astype(np.uint8) * 255)
+
+    # Optional morphological close to bridge tiny gaps
+    try:
+        if cv2 is not None:
+            kernel_close = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (3, 3))
+            mask_img = cv2.morphologyEx(mask_img, cv2.MORPH_CLOSE, kernel_close)
+            # Remove small specks
+            kernel_open = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (2, 2))
+            mask_img = cv2.morphologyEx(mask_img, cv2.MORPH_OPEN, kernel_open)
+    except Exception:
+        pass
+
+    # Find contours
+    contours_list = []
+    try:
+        if cv2 is not None:
+            contours, hierarchy = cv2.findContours(mask_img, cv2.RETR_TREE, cv2.CHAIN_APPROX_SIMPLE)
+            # contours are arrays of shape (N,1,2)
+            for cnt in contours:
+                area = abs(cv2.contourArea(cnt))
+                if area < 10:  # filter noise
+                    continue
+                # approx poly to simplify
+                eps = 0.001 * cv2.arcLength(cnt, True)
+                approx = cv2.approxPolyDP(cnt, eps, True)
+                if len(approx) >= 3:
+                    contours_list.append(approx.reshape(-1, 2).astype(float))
+        else:
+            # Fallback: use skimage contours
+            from skimage import measure
+            cs = measure.find_contours(mask_img.astype(float), 128)
+            for c in cs:
+                if c.shape[0] < 3:
+                    continue
+                # c is (row, col) float; convert to (x,y)
+                pts = np.column_stack([c[:, 1], c[:, 0]])
+                if pts.shape[0] >= 3:
+                    contours_list.append(pts)
+    except Exception as exc:
+        print(f"contour extraction failed: {exc}")
+        contours_list = []
+
+    if not contours_list:
+        return None
+
+    # Compute bounds across all contours
+    all_pts = np.vstack(contours_list)
+    min_x = float(np.min(all_pts[:, 0]))
+    max_x = float(np.max(all_pts[:, 0]))
+    min_y = float(np.min(all_pts[:, 1]))
+    max_y = float(np.max(all_pts[:, 1]))
+
+    pixel_width = max_x - min_x
+    pixel_height = max_y - min_y
+    if pixel_width <= 0 or pixel_height <= 0:
+        return None
+
+    scale = float(target_width_mm) / float(pixel_width)
+    target_height_mm = float(pixel_height) * scale
+
+    # Build combined SVG path (fill-rule evenodd)
+    def contour_to_svg(contour):
+        pts = np.array(contour, dtype=float)
+        pts[:, 0] = (pts[:, 0] - min_x) * scale
+        pts[:, 1] = (pts[:, 1] - min_y) * scale
+        s = f"M {pts[0,0]:.5f},{pts[0,1]:.5f} "
+        for x, y in pts[1:]:
+            s += f"L {x:.5f},{y:.5f} "
+        s += "Z "
+        return s
+
+    combined_path = ''
+    for cnt in contours_list:
+        combined_path += contour_to_svg(cnt)
+
+    svg = f'''<svg xmlns="http://www.w3.org/2000/svg"
+     width="{target_width_mm}mm"
+     height="{target_height_mm}mm"
+     viewBox="0 0 {target_width_mm} {target_height_mm}">
+
+    <path d="{combined_path}" fill="black" fill-rule="evenodd" stroke="none"/>
+
+</svg>
+'''
+
+    # Write temp files
+    tmpdir = tempfile.mkdtemp(prefix='stl_svg_')
+    svg_path = pathlib.Path(tmpdir) / 'pattern.svg'
+    scad_path = pathlib.Path(tmpdir) / 'pattern.scad'
+    stl_path = pathlib.Path(tmpdir) / 'pattern.stl'
+    svg_path.write_text(svg, encoding='utf-8')
+
+    scad = f"""
+linear_extrude(height = {thickness})
+import("{svg_path.as_posix()}", center = false);
+"""
+    scad_path.write_text(scad, encoding='utf-8')
+
+    # Run OpenSCAD to produce STL
+    try:
+        proc = subprocess.run(["openscad", "-o", str(stl_path), str(scad_path)], capture_output=True, text=True, timeout=30)
+        if proc.returncode != 0:
+            print('OpenSCAD failed:', proc.stderr)
+            return None
+    except FileNotFoundError:
+        print('OpenSCAD binary not found')
+        return None
+    except Exception as e:
+        print('OpenSCAD execution failed:', e)
+        return None
+
+    # Validate STL with trimesh if available
+    try:
+        if trimesh is not None:
+            mesh = trimesh.load(str(stl_path), force='mesh')
+            if not mesh.is_watertight:
+                print('OpenSCAD produced non-watertight mesh, falling back')
+                return None
+    except Exception as e:
+        print('Trimesh validation failed:', e)
+
+    try:
+        return stl_path.read_text(encoding='utf-8')
+    except Exception:
+        return None
+
+
+def generate_stl_via_shapely(mask_array, width, height, z_offset, thickness, target_width_mm=50.0):
+    """Generate STL using shapely + trimesh (pure Python). Combines contours into
+    a single polygon (or multipolygon) and extrudes using trimesh. Returns ASCII STL string or None.
+    """
+    try:
+        from shapely.geometry import Polygon, LinearRing
+        from shapely.ops import unary_union
+        import trimesh
+        from skimage import measure
+    except Exception as e:
+        print('shapely/trimesh/skimage not available:', e)
+        return None
+
+    # Ensure mask is boolean
+    try:
+        mask = (mask_array.astype(bool)).astype(np.uint8)
+    except Exception:
+        mask = (mask_array > 0).astype(np.uint8)
+
+    # Find contours (use OpenCV for hierarchy if available, fallback to skimage)
+    contours = None
+    hierarchy = None
+    try:
+        import cv2
+        # cv2 expects 0/255 uint8
+        mask_img = (mask * 255).astype('uint8')
+        cnts, hier = cv2.findContours(mask_img, cv2.RETR_TREE, cv2.CHAIN_APPROX_SIMPLE)
+        contours = cnts
+        hierarchy = hier
+    except Exception:
+        try:
+            contours = measure.find_contours(mask, 0.5)
+            hierarchy = None
+        except Exception as e:
+            print('contour extraction failed:', e)
+            return None
+
+    if not contours:
+        return None
+
+    # Compute bounds
+    if hierarchy is not None:
+        # contours are numpy arrays of shape (N,1,2) in cv2 (x,y)
+        all_pts = np.vstack([c.reshape(-1, 2) for c in contours])
+    else:
+        all_pts = np.vstack(contours)
+    min_x = float(np.min(all_pts[:, 1]))
+    max_x = float(np.max(all_pts[:, 1]))
+    min_y = float(np.min(all_pts[:, 0]))
+    max_y = float(np.max(all_pts[:, 0]))
+    pixel_width = max_x - min_x
+    pixel_height = max_y - min_y
+    if pixel_width <= 0 or pixel_height <= 0:
+        return None
+
+    scale = float(target_width_mm) / float(pixel_width)
+
+    shapely_polys = []
+    if hierarchy is not None:
+        # Build polygons with holes using contour hierarchy from OpenCV
+        hier = hierarchy[0]
+        used = set()
+        for i, cnt in enumerate(contours):
+            if i in used:
+                continue
+            # parent == -1 means outer contour
+            parent = int(hier[i][3])
+            if parent != -1:
+                # skip child contours here; they'll be attached to their parent
+                continue
+            # collect exterior
+            pts = cnt.reshape(-1, 2).astype(float)
+            # convert cv2 (x,y) to our (x,y) and scale/translate
+            pts[:, 0] = (pts[:, 0] - min_x) * scale
+            pts[:, 1] = (pts[:, 1] - min_y) * scale
+            holes = []
+            # find children
+            child = int(hier[i][2])
+            while child != -1:
+                ch_pts = contours[child].reshape(-1, 2).astype(float)
+                ch_pts[:, 0] = (ch_pts[:, 0] - min_x) * scale
+                ch_pts[:, 1] = (ch_pts[:, 1] - min_y) * scale
+                holes.append(ch_pts.tolist())
+                used.add(child)
+                child = int(hier[child][0])
+
+            try:
+                poly = Polygon(pts.tolist(), holes=holes if holes else None)
+                if not poly.is_valid:
+                    poly = poly.buffer(0)
+                if poly.is_empty:
+                    continue
+                if abs(poly.area) < 1e-4:
+                    continue
+                shapely_polys.append(poly)
+            except Exception:
+                continue
+    else:
+        # No hierarchy: treat each contour as a polygon and union them
+        for c in contours:
+            if c.shape[0] < 3:
+                continue
+            pts = np.column_stack([c[:, 1], c[:, 0]]).astype(float)
+            pts[:, 0] = (pts[:, 0] - min_x) * scale
+            pts[:, 1] = (pts[:, 1] - min_y) * scale
+            try:
+                poly = Polygon(pts.tolist())
+                if not poly.is_valid:
+                    poly = poly.buffer(0)
+                if poly.is_empty:
+                    continue
+                if abs(poly.area) < 1e-4:
+                    continue
+                shapely_polys.append(poly)
+            except Exception:
+                continue
+
+    if not shapely_polys:
+        return None
+
+    try:
+        union = unary_union(shapely_polys)
+    except Exception as e:
+        print('unary_union failed:', e)
+        return None
+
+    # Ensure we have polygon(s)
+    geom_list = []
+    if union.geom_type == 'Polygon':
+        geom_list = [union]
+    elif union.geom_type == 'MultiPolygon':
+        geom_list = list(union.geoms)
+    else:
+        # Unexpected geometry
+        return None
+
+    # Rasterize the unified vector geometry at high resolution and run marching-cubes on the raster.
+    try:
+        from PIL import Image, ImageDraw
+    except Exception:
+        Image = None
+
+    try:
+        # target raster resolution (px across target width)
+        raster_px = 2048
+        target_w_px = raster_px
+        target_h_px = max(64, int(round((pixel_height / float(pixel_width)) * raster_px)))
+
+        if Image is None:
+            # If Pillow is not available, fall back to trimesh extrusion
+            meshes = []
+            for poly in geom_list:
+                try:
+                    m = trimesh.creation.extrude_polygon(poly, thickness)
+                    if m is None or m.vertices.shape[0] == 0:
+                        continue
+                    meshes.append(m)
+                except Exception as e:
+                    print('extrude_polygon failed for poly:', e)
+                    continue
+            if not meshes:
+                return None
+            combined = trimesh.util.concatenate(meshes)
+            if z_offset:
+                combined.apply_translation([0, 0, z_offset])
+            stl_bytes = combined.export(file_type='stl')
+            if isinstance(stl_bytes, bytes):
+                try:
+                    return stl_bytes.decode('utf-8')
+                except Exception:
+                    return combined.export(file_type='stl_ascii')
+            else:
+                return str(stl_bytes)
+
+        # Create white background image and draw filled polygons (black)
+        img = Image.new('L', (target_w_px, target_h_px), 255)
+        draw = ImageDraw.Draw(img)
+
+        # Scale from mm coords (union was created in mm using scale earlier) to pixels
+        sx = target_w_px / float(target_width_mm)
+        sy = target_h_px / (float(pixel_height) * scale / float(pixel_height) if pixel_height != 0 else target_h_px)
+        # Simpler: compute sy same as sx but respect aspect ratio
+        sy = target_h_px / float(target_height_mm) if 'target_height_mm' in locals() else sx
+
+        # Helper to convert coords
+        def to_px_coords(coords):
+            return [(float(x) * sx, float(y) * sy) for (x, y) in coords]
+
+        for poly in geom_list:
+            try:
+                exterior = list(poly.exterior.coords)
+                exterior_px = to_px_coords(exterior)
+                draw.polygon(exterior_px, fill=0)
+                for hole in poly.interiors:
+                    hole_px = to_px_coords(list(hole.coords))
+                    draw.polygon(hole_px, fill=255)
+            except Exception:
+                continue
+
+        mask_raster = np.array(img)
+        mask_bool = (mask_raster < 128)
+
+        # Run marching cubes on the rasterized mask
+        stl_mc = generate_stl_marching_cubes(mask_bool, target_w_px, target_h_px, z_offset=z_offset, thickness=thickness, max_dim=max(target_w_px, target_h_px))
+        return stl_mc
+    except Exception as e:
+        print('vector->raster->mc failed:', e)
+        # As absolute fallback, try trimesh extrusion
+        try:
+            meshes = []
+            for poly in geom_list:
+                try:
+                    m = trimesh.creation.extrude_polygon(poly, thickness)
+                    if m is None or m.vertices.shape[0] == 0:
+                        continue
+                    meshes.append(m)
+                except Exception as e2:
+                    print('extrude_polygon failed for poly fallback:', e2)
+                    continue
+            if not meshes:
+                return None
+            combined = trimesh.util.concatenate(meshes)
+            if z_offset:
+                combined.apply_translation([0, 0, z_offset])
+            stl_bytes = combined.export(file_type='stl')
+            if isinstance(stl_bytes, bytes):
+                try:
+                    return stl_bytes.decode('utf-8')
+                except Exception:
+                    return combined.export(file_type='stl_ascii')
+            else:
+                return str(stl_bytes)
+        except Exception:
+            return None
 
 if __name__ == '__main__':
     app.run(debug=os.getenv('FLASK_DEBUG', '').lower() in ('1', 'true', 'yes'), host='0.0.0.0', port=8080)

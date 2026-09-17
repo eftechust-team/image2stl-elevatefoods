@@ -3,8 +3,24 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="HandheldFriendly" content="true">
     <title>AI Image to STL Generator</title>
     <style>
+        :root {
+            --moon-cream: #fffaf2;
+            --moon-warm: #f7e7c6;
+            --gold: #f4b942;
+            --amber: #e58a1d;
+            --burnt-orange: #c85d17;
+            --jade: #6f8b5d;
+            --plum: #6a3d34;
+            --ink: #352314;
+            --ink-soft: #59442b;
+            --panel: #fffdf9;
+            --panel-line: #ead9b9;
+            --muted: #725a42;
+        }
+
         * {
             margin: 0;
             padding: 0;
@@ -13,11 +29,12 @@
         
         body {
             font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
-            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            background: linear-gradient(135deg, #f6e7be 0%, #e7b86d 35%, #d7833f 100%);
             min-height: 100vh;
             padding: 0;
             margin: 0;
             padding-top: 80px;
+            color: var(--ink);
         }
 
         .top-header {
@@ -26,16 +43,23 @@
             left: 0;
             right: 0;
             z-index: 1000;
-            background: white;
-            box-shadow: 0 8px 24px rgba(0, 0, 0, 0.2);
-            padding: 12px 20px;
+            background: rgba(255, 250, 242, 0.96);
+            box-shadow: 0 8px 24px rgba(76, 43, 17, 0.18);
+            padding: 6px 0;
+            border-bottom: 1px solid rgba(116, 68, 27, 0.12);
+        }
+
+        .top-header-inner {
+            width: 100%;
+            padding-left: 18px;
+            margin: 0;
             display: flex;
             align-items: center;
-            gap: 20px;
+            justify-content: flex-start;
         }
 
         .fixed-logo {
-            max-width: 200px;
+            max-width: 180px;
             height: auto;
             flex-shrink: 0;
         }
@@ -43,7 +67,7 @@
         .top-header h1 {
             margin: 0;
             font-size: 24px;
-            color: #667eea;
+            color: var(--burnt-orange);
             flex: 1;
         }
 
@@ -61,10 +85,11 @@
         .container {
             max-width: 1000px;
             margin: 0 auto 20px auto;
-            background: white;
-            border-radius: 12px;
-            box-shadow: 0 20px 60px rgba(0, 0, 0, 0.3);
+            background: var(--panel);
+            border-radius: 16px;
+            box-shadow: 0 20px 60px rgba(78, 45, 20, 0.18);
             padding: 36px;
+            border: 1px solid rgba(149, 101, 42, 0.12);
         }
 
         .header {
@@ -82,16 +107,17 @@
         h1 {
             margin-bottom: 30px;
             text-align: center;
+            color: var(--plum);
         }
         
         h2 {
-            color: #555;
+            color: var(--plum);
             margin: 20px 0 15px 0;
             font-size: 1.3em;
         }
         
         h3 {
-            color: #666;
+            color: var(--ink-soft);
             margin: 15px 0 10px 0;
             font-size: 1.1em;
         }
@@ -99,13 +125,59 @@
         .section {
             margin-bottom: 30px;
             padding-bottom: 20px;
-            border-bottom: 1px solid #eee;
+            border-bottom: 1px solid var(--panel-line);
         }
         
         .input-group {
             display: flex;
             gap: 10px;
             margin-bottom: 20px;
+            flex-wrap: wrap;
+            align-items: center;
+        }
+
+        .file-picker-wrap {
+            position: relative;
+            display: inline-flex;
+        }
+
+        .file-picker-input {
+            position: absolute;
+            width: 1px;
+            height: 1px;
+            opacity: 0;
+            pointer-events: none;
+        }
+
+        .file-picker-btn {
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            min-height: 46px;
+            padding: 12px 18px;
+            border: none;
+            border-radius: 8px;
+            background: linear-gradient(135deg, #d98d2a 0%, #b85d1e 100%);
+            color: #fffdf8;
+            font-size: 14px;
+            font-weight: 700;
+            cursor: pointer;
+            box-shadow: 0 6px 14px rgba(184, 93, 30, 0.22);
+            transition: transform 0.2s ease, box-shadow 0.2s ease, filter 0.2s ease;
+        }
+
+        .file-picker-btn:hover {
+            transform: translateY(-1px);
+            filter: brightness(1.03);
+            box-shadow: 0 10px 18px rgba(184, 93, 30, 0.25);
+        }
+        .file-picker-btn.disabled {
+            pointer-events: none;
+            opacity: 0.55;
+            cursor: not-allowed;
+            transform: none !important;
+            box-shadow: none !important;
+            filter: none !important;
         }
         
         input[type="text"], 
@@ -113,33 +185,39 @@
         select {
             flex: 1;
             padding: 12px;
-            border: 2px solid #ddd;
-            border-radius: 6px;
+            border: 2px solid #e7d7b7;
+            border-radius: 8px;
             font-size: 14px;
-            transition: border-color 0.3s;
+            background: #fffdf9;
+            color: var(--ink);
+            transition: border-color 0.3s, box-shadow 0.3s;
         }
         
         input[type="text"]:focus,
         input[type="number"]:focus,
         select:focus {
             outline: none;
-            border-color: #667eea;
+            border-color: var(--amber);
+            box-shadow: 0 0 0 3px rgba(229, 138, 29, 0.15);
         }
         
         button {
             padding: 12px 24px;
-            background: #667eea;
-            color: white;
+            background: linear-gradient(135deg, #d98d2a 0%, #b85d1e 100%);
+            color: #fffdf8;
             border: none;
-            border-radius: 6px;
+            border-radius: 8px;
             cursor: pointer;
             font-size: 14px;
-            font-weight: 600;
-            transition: background 0.3s;
+            font-weight: 700;
+            transition: transform 0.2s ease, box-shadow 0.2s ease, filter 0.2s ease;
+            box-shadow: 0 6px 14px rgba(184, 93, 30, 0.22);
         }
         
         button:hover {
-            background: #5568d3;
+            transform: translateY(-1px);
+            filter: brightness(1.03);
+            box-shadow: 0 10px 18px rgba(184, 93, 30, 0.25);
         }
 
         .mode-button {
@@ -161,9 +239,9 @@
             gap: 0;
             padding: 6px;
             border-radius: 999px;
-            background: #eef2ff;
-            border: 1px solid #d7def7;
-            box-shadow: inset 0 1px 3px rgba(15, 23, 42, 0.06);
+            background: #f9eedb;
+            border: 1px solid #ebd0a4;
+            box-shadow: inset 0 1px 3px rgba(101, 59, 16, 0.08);
             overflow: hidden;
         }
 
@@ -174,8 +252,8 @@
             left: 6px;
             width: calc(50% - 6px);
             border-radius: 999px;
-            background: linear-gradient(135deg, #667eea 0%, #4c63d2 100%);
-            box-shadow: 0 10px 18px rgba(76, 99, 210, 0.25);
+            background: linear-gradient(135deg, #d98d2a 0%, #b85d1e 100%);
+            box-shadow: 0 10px 18px rgba(184, 93, 30, 0.24);
             transition: transform 0.28s cubic-bezier(0.22, 1, 0.36, 1), background 0.25s ease;
             pointer-events: none;
         }
@@ -186,28 +264,31 @@
         }
 
         .mode-button.is-inactive {
-            color: #1f2a44;
+            color: var(--ink-soft);
             transform: none;
         }
 
         .mode-button:focus-visible {
-            outline: 3px solid rgba(102, 126, 234, 0.35);
+            outline: 3px solid rgba(184, 93, 30, 0.35);
             outline-offset: 2px;
         }
         
         button:disabled {
-            background: #ccc;
+            background: #d7cdb8;
+            box-shadow: none;
             cursor: not-allowed;
+            filter: grayscale(0.15);
         }
         
         .status {
             padding: 15px;
             margin: 20px 0;
-            border-radius: 6px;
-            background: #f0f4ff;
-            color: #667eea;
+            border-radius: 8px;
+            background: #fff1d8;
+            color: #7a430d;
             text-align: center;
-            font-weight: 500;
+            font-weight: 600;
+            border: 1px solid #f0c57a;
         }
         
         progress {
@@ -228,21 +309,21 @@
             width: 100%;
             height: 200px;
             object-fit: contain;
-            background: #fff;
-            border: 3px solid #ddd;
-            border-radius: 8px;
+            background: #fffdf9;
+            border: 3px solid #ebd9bc;
+            border-radius: 10px;
             cursor: pointer;
             transition: all 0.3s;
         }
         
         #images img:hover {
-            border-color: #667eea;
+            border-color: var(--amber);
             transform: scale(1.05);
         }
         
         #images img.selected {
-            border-color: #764ba2;
-            box-shadow: 0 0 0 3px rgba(118, 75, 162, 0.2);
+            border-color: #b85d1e;
+            box-shadow: 0 0 0 3px rgba(184, 93, 30, 0.18);
         }
 
         .selection-layout {
@@ -295,6 +376,26 @@
             padding: 15px;
             background: #f9f9f9;
             border-radius: 6px;
+        }
+
+        /* Mobile / small screens adjustments */
+        @media (max-width: 800px) {
+            .container { padding: 18px; margin-top: 64px; }
+            .top-header-inner { padding-left: 12px; }
+            .selection-layout { display: block; }
+            .selection-canvas-wrap { flex: 1 1 100%; min-width: 0; }
+            .selection-tools { min-width: 0; width: 100%; }
+            .file-picker-btn, button, .mode-button { width: 100%; padding: 14px; font-size: 16px; }
+            #images img { height: auto; min-height: 120px; }
+            #canvas, #selectCanvas { touch-action: manipulation; width: 100%; height: auto; }
+            .controls { padding: 10px; gap: 10px; }
+            body { padding-top: 72px; }
+        }
+
+        /* Larger touch targets for mobile */
+        @media (max-width: 480px) {
+            .file-picker-btn, button, .mode-button { min-height: 56px; border-radius: 10px; }
+            input[type="text"], input[type="number"], select { font-size: 16px; padding: 14px; }
         }
         
         label {
@@ -855,36 +956,55 @@
 </head>
 <body>
     <div class="top-header">
-        <img src="/static/logo.jpeg" alt="Company Logo" class="fixed-logo">
+        <div class="top-header-inner">
+            <img src="/static/logo.png" alt="Company Logo" class="fixed-logo">
+        </div>
     </div>
     
     <div class="container">
-        <h1 style="text-align: center; color: #667eea; margin-top: 0; margin-bottom: 30px; font-size: 32px; padding: 30px 0;">AI Image to STL Generator</h1>
+        <h1 style="text-align: center; color: #8f4d22; margin-top: 0; margin-bottom: 30px; font-size: 32px; padding: 30px 0;">AI Image to STL Generator</h1>
         
         <div class="header">
-            <img src="/static/logo.jpeg" alt="Company Logo" class="logo">
+            <img src="/static/logo.png" alt="Company Logo" class="logo">
             <h1>🎨 AI Image to STL Generator</h1>
+        </div>
+
+        <div class="section" id="groupSelectionSection">
+            <h2>Step 1: Choose Your Group Number</h2>
+            <div class="info-box" style="background: #fff4dd; border-left-color: #d98d2a; margin-bottom: 15px;">
+                <p style="margin: 0; color: #7b4d17; font-weight: 700;">Please select your group number before continuing.</p>
+            </div>
+            <div style="display: flex; flex-wrap: wrap; gap: 12px; justify-content: center;">
+                <button type="button" class="group-choice-btn" data-group="1" style="min-width: 64px; min-height: 48px; padding: 12px 18px; border: 2px solid #d98d2a; border-radius: 12px; background: linear-gradient(135deg, #fff7ec 0%, #f4d8a8 100%); color: #5a3415; font-weight: 800; font-size: 16px; cursor: pointer; box-shadow: 0 4px 10px rgba(180, 118, 34, 0.18); transition: all 0.2s ease;">1</button>
+                <button type="button" class="group-choice-btn" data-group="2" style="min-width: 64px; min-height: 48px; padding: 12px 18px; border: 2px solid #d98d2a; border-radius: 12px; background: linear-gradient(135deg, #fff7ec 0%, #f4d8a8 100%); color: #5a3415; font-weight: 800; font-size: 16px; cursor: pointer; box-shadow: 0 4px 10px rgba(180, 118, 34, 0.18); transition: all 0.2s ease;">2</button>
+                <button type="button" class="group-choice-btn" data-group="3" style="min-width: 64px; min-height: 48px; padding: 12px 18px; border: 2px solid #d98d2a; border-radius: 12px; background: linear-gradient(135deg, #fff7ec 0%, #f4d8a8 100%); color: #5a3415; font-weight: 800; font-size: 16px; cursor: pointer; box-shadow: 0 4px 10px rgba(180, 118, 34, 0.18); transition: all 0.2s ease;">3</button>
+                <button type="button" class="group-choice-btn" data-group="4" style="min-width: 64px; min-height: 48px; padding: 12px 18px; border: 2px solid #d98d2a; border-radius: 12px; background: linear-gradient(135deg, #fff7ec 0%, #f4d8a8 100%); color: #5a3415; font-weight: 800; font-size: 16px; cursor: pointer; box-shadow: 0 4px 10px rgba(180, 118, 34, 0.18); transition: all 0.2s ease;">4</button>
+                <button type="button" class="group-choice-btn" data-group="5" style="min-width: 64px; min-height: 48px; padding: 12px 18px; border: 2px solid #d98d2a; border-radius: 12px; background: linear-gradient(135deg, #fff7ec 0%, #f4d8a8 100%); color: #5a3415; font-weight: 800; font-size: 16px; cursor: pointer; box-shadow: 0 4px 10px rgba(180, 118, 34, 0.18); transition: all 0.2s ease;">5</button>
+                <button type="button" class="group-choice-btn" data-group="6" style="min-width: 64px; min-height: 48px; padding: 12px 18px; border: 2px solid #d98d2a; border-radius: 12px; background: linear-gradient(135deg, #fff7ec 0%, #f4d8a8 100%); color: #5a3415; font-weight: 800; font-size: 16px; cursor: pointer; box-shadow: 0 4px 10px rgba(180, 118, 34, 0.18); transition: all 0.2s ease;">6</button>
+                <button type="button" class="group-choice-btn" data-group="7" style="min-width: 64px; min-height: 48px; padding: 12px 18px; border: 2px solid #d98d2a; border-radius: 12px; background: linear-gradient(135deg, #fff7ec 0%, #f4d8a8 100%); color: #5a3415; font-weight: 800; font-size: 16px; cursor: pointer; box-shadow: 0 4px 10px rgba(180, 118, 34, 0.18); transition: all 0.2s ease;">7</button>
+                <button type="button" class="group-choice-btn" data-group="8" style="min-width: 64px; min-height: 48px; padding: 12px 18px; border: 2px solid #d98d2a; border-radius: 12px; background: linear-gradient(135deg, #fff7ec 0%, #f4d8a8 100%); color: #5a3415; font-weight: 800; font-size: 16px; cursor: pointer; box-shadow: 0 4px 10px rgba(180, 118, 34, 0.18); transition: all 0.2s ease;">8</button>
+                <button type="button" class="group-choice-btn" data-group="9" style="min-width: 64px; min-height: 48px; padding: 12px 18px; border: 2px solid #d98d2a; border-radius: 12px; background: linear-gradient(135deg, #fff7ec 0%, #f4d8a8 100%); color: #5a3415; font-weight: 800; font-size: 16px; cursor: pointer; box-shadow: 0 4px 10px rgba(180, 118, 34, 0.18); transition: all 0.2s ease;">9</button>
+                <button type="button" class="group-choice-btn" data-group="10" style="min-width: 64px; min-height: 48px; padding: 12px 18px; border: 2px solid #d98d2a; border-radius: 12px; background: linear-gradient(135deg, #fff7ec 0%, #f4d8a8 100%); color: #5a3415; font-weight: 800; font-size: 16px; cursor: pointer; box-shadow: 0 4px 10px rgba(180, 118, 34, 0.18); transition: all 0.2s ease;">10</button>
+            </div>
+            <div id="groupSelectionStatus" class="status" style="margin-top: 12px; display: none;">Group not selected yet.</div>
         </div>
         
         <!-- Image Generation Section -->
         <div class="section">
-            <h2>Step 1: Choose Image Source</h2>
-            <div class="mode-switch" style="margin-bottom: 16px;">
-                <div id="modeSwitchThumb" class="mode-switch-thumb"></div>
-                <button id="aiModeBtn" class="mode-button" style="background: #667eea;">AI Image Mode</button>
-                <button id="uploadModeBtn" class="mode-button" style="background: #27ae60;">Upload Image Mode</button>
-            </div>
-            <div id="aiGenerationPanel" style="display: none;"></div>
+            <h2>Step 2: Upload Image</h2>
             <div id="uploadGenerationPanel" style="display: none;">
-                <div class="info-box" style="background: #e8f5e9; border-left-color: #27ae60; margin-bottom: 15px;">
-                    <p style="margin: 0; color: #1b5e20; font-weight: 600;">Upload a photo or scan with a white background and a black subject.</p>
-                    <p style="margin: 8px 0 0 0; color: #1b5e20; font-size: 13px;">The app will extract the main dark part and suppress softer shadows from camera photos.</p>
+                <div class="info-box" style="background: #fff5e9; border-left-color: #d98d2a; margin-bottom: 15px;">
+                    <p style="margin: 0; color: #6d4317; font-weight: 700;">Take a photo with your camera or choose an existing image with a white background and a black subject.</p>
+                    <p style="margin: 8px 0 0 0; color: #7d521d; font-size: 13px;">The app will extract the main dark part and suppress softer shadows from camera photos.</p>
                 </div>
                 <div class="input-group">
-                    <input type="file" id="uploadImageInput" accept="image/*">
-                    <button id="uploadImageBtn">Upload &amp; Edit</button>
+                    <div class="file-picker-wrap">
+                        <input class="file-picker-input" type="file" id="uploadImageInput" accept="image/*">
+                        <label class="file-picker-btn" for="uploadImageInput">Choose File</label>
+                    </div>
+                    <button id="uploadImageBtn" class="file-picker-btn" type="button" style="min-height: 46px;">Take Photo</button>
                 </div>
-                <div id="uploadStatus" class="status" style="margin-top: 0; display: none;"></div>
+                <div id="uploadStatus" class="status" style="margin-top: 0; display: block;">Take a photo or upload an image to extract the main subject.</div>
                 <div id="uploadComparePanel" class="upload-compare-panel"></div>
             </div>
             <div id="images"></div>
@@ -892,25 +1012,25 @@
         
         <!-- Image Selection Section -->
         <div class="section" id="selectionSection" style="display: none;">
-            <h2>Step 2: Choose Generation Mode</h2>
+            <h2 id="selectionStepTitle">Step 2: Choose Generation Mode</h2>
             
             <!-- Mode Selection -->
             <div id="modeSelection" style="display: none;">
-                <div class="info-box" style="background: #e3f2fd; border-left-color: #2196f3;">
-                    <p style="margin: 0 0 15px 0; font-weight: 600; color: #1976d2;">Select how you want to generate your 3D model:</p>
-                    <p style="margin: 0; font-size: 13px; color: #d32f2f; background: #ffebee; padding: 10px; border-radius: 4px; border-left: 3px solid #d32f2f;">
+                <div class="info-box" style="background: #fff5e9; border-left-color: #d98d2a;">
+                    <p style="margin: 0 0 15px 0; font-weight: 700; color: #7d4a1c;">Select how you want to generate your 3D model:</p>
+                    <p style="margin: 0; font-size: 13px; color: #7a3e11; background: #fff1d8; padding: 10px; border-radius: 6px; border-left: 3px solid #d98d2a;">
                         ⚠️ <strong>Note:</strong> Images with too thin lines or too small dots may not print successfully. The AI will prioritize thick strokes and large dots for better 3D printability.
                     </p>
                 </div>
                 
                 <div style="display: flex; gap: 20px; margin: 20px 0;">
-                    <button id="fastGenerateBtn" style="flex: 1; padding: 20px; background: #27ae60; font-size: 16px; display: flex; flex-direction: column; align-items: center; gap: 10px;">
+                    <button id="fastGenerateBtn" style="flex: 1; padding: 20px; background: linear-gradient(135deg, #7aa069 0%, #5d7d4d 100%); color: #fffdf8; font-size: 16px; display: flex; flex-direction: column; align-items: center; gap: 10px;">
                         <span style="font-size: 24px;">⚡</span>
                         <span style="font-weight: 700;">Fast Generate</span>
                         <span style="font-size: 12px; font-weight: 400; opacity: 0.9;">Extract black pixels as hollow shell</span>
                     </button>
                     
-                    <button id="manualEditBtn" style="flex: 1; padding: 20px; background: #667eea; font-size: 16px; display: flex; flex-direction: column; align-items: center; gap: 10px;">
+                    <button id="manualEditBtn" style="flex: 1; padding: 20px; background: linear-gradient(135deg, #d98d2a 0%, #b85d1e 100%); color: #fffdf8; font-size: 16px; display: flex; flex-direction: column; align-items: center; gap: 10px;">
                         <span style="font-size: 24px;">✏️</span>
                         <span style="font-weight: 700;">Manual Edit & Multi-Layer</span>
                         <span style="font-size: 12px; font-weight: 400; opacity: 0.9;">Edit details and create multiple layers</span>
@@ -923,24 +1043,39 @@
             <!-- Drawing Canvas -->
             <div id="drawingSection" style="display: none;">
                 <div style="display: flex; justify-content: space-between; align-items: center;">
-                    <h3>Draw on Image</h3>
-                    <button id="backToImages" style="padding: 6px 12px;">← Back to Image Selection</button>
+                    <h3 id="drawingStepTitle" style="display: none;">Detailed Editing</h3>
                 </div>
-                <div class="controls">
-                    <label>Pen Color:
+                <div class="controls" style="display:flex; gap:12px; align-items:center; flex-wrap:nowrap; overflow-x:auto;">
+                    <label style="white-space:nowrap;">Pen Color:
                         <input type="radio" name="penColor" value="black" checked> Black
                         <input type="radio" name="penColor" value="white"> White
                     </label>
-                    <label>
+                    <label style="white-space:nowrap;">
                         Brush Size: <input type="range" id="brushSize" min="1" max="50" value="5">
                         <span id="brushSizeLabel">5 px</span>
                     </label>
-                    <button id="bucketBtn">Paint Bucket</button>
-                    <button id="undoBtn">↶ Undo</button>
-                    <button id="redoBtn">↷ Redo</button>
+                    <button id="bucketBtn" type="button">Paint Bucket</button>
+                    <button id="undoBtn" type="button">↶ Undo</button>
+                    <button id="redoBtn" type="button">↷ Redo</button>
                 </div>
                 <canvas id="canvas" width="400" height="400"></canvas>
-                <button id="editDone" style="display: none;">Done Editing</button>
+                <div style="text-align:center; margin-top:10px;">
+                    <button id="editDone" type="button" style="display:none; padding:12px 22px; font-size:16px; font-weight:800; border-radius:10px; min-width:120px;">Done</button>
+                </div>
+            </div>
+
+            <div id="colorSelectionSection" style="display:none; margin-top:20px;">
+                <h2>Step 4: Choose a Color</h2>
+                <div class="info-box" style="background: #fff5e9; border-left-color: #d98d2a; margin-bottom: 15px;">
+                    <p style="margin: 0; color: #6d4317; font-weight: 700;">Choose one color for the STL output.</p>
+                </div>
+                <div class="controls" style="display:flex; gap:12px; align-items:center; flex-wrap:nowrap; justify-content:center;">
+                    <button type="button" class="color-choice-btn" data-color="white" style="background:#f8fafc; color:#1f2937; border:2px solid #dbe1ea; padding:10px 16px; border-radius:10px; font-weight:700;">White</button>
+                    <button type="button" class="color-choice-btn" data-color="pink" style="background:#fdf2f8; color:#7c2d12; border:2px solid #f9a8d4; padding:10px 16px; border-radius:10px; font-weight:700;">Pink</button>
+                    <button type="button" class="color-choice-btn" data-color="purple" style="background:#f5f3ff; color:#4c1d95; border:2px solid #c4b5fd; padding:10px 16px; border-radius:10px; font-weight:700;">Purple</button>
+                    <button type="button" class="color-choice-btn" data-color="yellow" style="background:#fef3c7; color:#78350f; border:2px solid #fcd34d; padding:10px 16px; border-radius:10px; font-weight:700;">Yellow</button>
+                </div>
+                <button id="generateColorStlBtn" type="button" style="display:block; margin: 10px auto 0;">Generate STL File</button>
             </div>
             
             <!-- Layer Setup -->
@@ -950,7 +1085,6 @@
                     <div style="width: 300px; display: flex; flex-direction: column; gap: 15px;">
                         <div style="display: flex; justify-content: space-between; align-items: center;">
                             <h3 style="margin: 0;">Layer Configuration</h3>
-                            <button id="backToEdit" style="padding: 6px 12px;">← Back to Edit</button>
                         </div>
                         <label style="display: flex; flex-direction: column; gap: 5px; width: 100%;">
                             Number of Layers:
@@ -1043,7 +1177,6 @@
                     <div style="width: 300px; display: flex; flex-direction: column; gap: 15px;">
                         <div style="display: flex; justify-content: space-between; align-items: center;">
                             <h3 style="margin: 0;">Layer Configuration</h3>
-                            <button id="backToEdit" style="padding: 6px 12px;">← Back to Edit</button>
                         </div>
                         <label style="display: flex; flex-direction: column; gap: 5px; width: 100%;">
                             Number of Layers:
@@ -1105,7 +1238,6 @@
             <div class="upload-editor-header">
                 <div>
                     <h2>Prepare Uploaded Image</h2>
-                    <p style="margin:6px 0 0 0; color:#5b6478; font-size:14px;">Adjust brightness, contrast, and crop before extraction.</p>
                 </div>
                 <button id="uploadEditorCloseBtn" type="button" class="danger-btn">Close</button>
             </div>
@@ -1142,17 +1274,10 @@
                         </div>
                     </div>
                     <div class="upload-editor-group">
-                        <h3>Crop Image</h3>
-                        <p class="crop-hint">Drag the 8 handles on the green frame to resize the crop area. Use the frame itself to reposition it.</p>
-                        <div class="upload-editor-actions" style="margin-top:12px;">
-                            <button id="uploadResetAdjustmentsBtn" type="button" class="danger-btn">Reset Adjustments</button>
-                        </div>
-                    </div>
-                    <div class="upload-editor-group">
-                        <h3>Finish</h3>
-                        <div class="upload-editor-actions">
-                            <button id="uploadCancelEditBtn" type="button" class="danger-btn">Cancel</button>
-                            <button id="uploadFinishEditBtn" type="button" style="background:#27ae60;">Finish</button>
+                        <div class="upload-editor-actions" style="display:flex; flex-wrap:wrap; gap:10px;">
+                            <button id="uploadResetAdjustmentsBtn" type="button" class="danger-btn" style="flex:1 1 180px;">Reset Adjustments</button>
+                            <button id="uploadCancelEditBtn" type="button" class="danger-btn" style="flex:1 1 120px;">Cancel</button>
+                            <button id="uploadFinishEditBtn" type="button" style="flex:1 1 120px; background:#27ae60;">Finish</button>
                         </div>
                     </div>
                 </div>
@@ -1160,9 +1285,29 @@
         </div>
     </div>
 
+    <div id="cameraCaptureOverlay" class="camera-capture-overlay" style="display:none;">
+        <div class="camera-capture-modal">
+            <div class="camera-capture-header">
+                <h2>Take a Photo</h2>
+                <button id="cameraCaptureCloseBtn" type="button" class="danger-btn">Close</button>
+            </div>
+            <div class="camera-capture-body">
+                <video id="cameraPreviewVideo" autoplay playsinline muted></video>
+                <canvas id="cameraCaptureCanvas" width="1280" height="960" style="display:none;"></canvas>
+            </div>
+            <div class="camera-capture-actions">
+                <button id="cameraRetakeBtn" type="button" class="danger-btn" style="display:none;">Retake</button>
+                <button id="cameraTakePhotoBtn" type="button" style="background:#27ae60;">Take Photo</button>
+                <button id="cameraUsePhotoBtn" type="button" style="display:none; background:#27ae60;">Use Photo</button>
+            </div>
+        </div>
+    </div>
+
     <script>
         let selectedImage = null;
+        let selectedGroupNumber = null;
         let editedImage = null;
+        let selectedPrintColor = 'white';
         let layerSelections = {};
         let layerHeights = {};
         let currentLayerIndex = -1;
@@ -1178,6 +1323,9 @@
         let currentImageSource = 'ai';
         let uploadEditorFile = null;
         let uploadEditorImage = null;
+        let uploadEditorOriginalDataUrl = null;
+        let cameraStream = null;
+        let cameraCapturedDataUrl = null;
         let selectionToolCleanup = null;
         let uploadEditorState = {
             brightness: 0,
@@ -1193,14 +1341,6 @@
             dragInputType: null,
             dragCropStart: null
         };
-        const aiGenerationMarkup = `
-            <div class="input-group">
-                <input type="text" id="prompt" placeholder="Describe what you want to generate (e.g., cat, heart, star)">
-                <button id="generate">Generate Images</button>
-            </div>
-            <div id="aiStatus" class="status">Enter a prompt to generate images.</div>
-        `;
-
         function sanitizeFilename(value) {
             const fallback = 'model';
             const cleaned = String(value || '')
@@ -1246,6 +1386,19 @@
                 comparePanel.innerHTML = '';
             }
             hideUploadEditor();
+        }
+
+        // Disable/enable upload controls (Choose File / Take Photo)
+        function setUploadControlsEnabled(enabled) {
+            const uploadBtn = document.getElementById('uploadImageBtn');
+            const uploadInput = document.getElementById('uploadImageInput');
+            const filePickerLabel = document.querySelector('#uploadImageInput + label.file-picker-btn');
+            if (uploadBtn) uploadBtn.disabled = !enabled;
+            if (uploadInput) uploadInput.disabled = !enabled;
+            if (filePickerLabel) {
+                if (!enabled) filePickerLabel.classList.add('disabled');
+                else filePickerLabel.classList.remove('disabled');
+            }
         }
 
         function hideUploadEditor() {
@@ -1475,6 +1628,7 @@
 
         async function openUploadEditorFromFile(file) {
             uploadEditorFile = file;
+            uploadEditorOriginalDataUrl = null;
             uploadEditorState.brightness = 0;
             uploadEditorState.contrast = 0;
             uploadEditorState.crop = null;
@@ -1493,6 +1647,7 @@
                 reader.readAsDataURL(file);
             });
 
+            uploadEditorOriginalDataUrl = dataUrl;
             uploadEditorImage = await new Promise((resolve, reject) => {
                 const image = new Image();
                 image.onload = () => resolve(image);
@@ -1510,7 +1665,7 @@
 
         async function finishUploadEditor() {
             if (!uploadEditorImage || !uploadEditorFile) {
-                throw new Error('No uploaded image is ready for extraction.');
+                throw new Error('No uploaded image is ready for editing.');
             }
 
             const cropRect = getUploadEditorCropRect();
@@ -1540,221 +1695,320 @@
 
             outputCtx.filter = 'none';
             const editedDataUrl = outputCanvas.toDataURL('image/png');
-            const editedBlob = await new Promise((resolve) => outputCanvas.toBlob(resolve, 'image/png'));
-            if (!editedBlob) {
-                throw new Error('Unable to prepare the edited image.');
-            }
+            const originalDataUrl = uploadEditorOriginalDataUrl || editedDataUrl;
 
-            const formData = new FormData();
-            const editedSourceName = (uploadEditorFile.name || 'uploaded_image').replace(/\.[^.]+$/, '');
-            formData.append('image', editedBlob, `${sanitizeFilename(editedSourceName)}_edited.png`);
-
-            const response = await fetch('/process_uploaded_image', {
-                method: 'POST',
-                body: formData
-            });
-
-            const responseText = await response.text();
-            let data = null;
-            try {
-                data = responseText ? JSON.parse(responseText) : null;
-            } catch (parseError) {
-                throw new Error(responseText || `Server returned ${response.status}`);
-            }
-
-            if (!response.ok || !data || data.error) {
-                throw new Error((data && data.error) ? data.error : responseText || 'Upload processing failed.');
-            }
-
-            const extractedDataUrl = 'data:image/png;base64,' + data.image;
             const comparePanel = document.getElementById('uploadComparePanel');
             if (comparePanel) {
+                // Do not show original/adjusted comparison after finishing the upload editor.
+                comparePanel.style.display = 'none';
                 comparePanel.innerHTML = '';
-                comparePanel.style.display = 'flex';
-
-                const editedCard = document.createElement('div');
-                editedCard.className = 'upload-result-card';
-                editedCard.innerHTML = '<h3>Edited image</h3><img id="uploadEditedPreview" alt="Edited upload preview">';
-
-                const extractedCard = document.createElement('div');
-                extractedCard.className = 'upload-result-card';
-                extractedCard.innerHTML = '<h3>Extracted image</h3><img id="uploadExtractedPreview" alt="Extracted upload preview">';
-
-                comparePanel.appendChild(editedCard);
-                comparePanel.appendChild(extractedCard);
-
-                const editedPreview = document.getElementById('uploadEditedPreview');
-                const extractedPreview = document.getElementById('uploadExtractedPreview');
-                editedPreview.src = editedDataUrl;
-                extractedPreview.src = extractedDataUrl;
-                editedPreview.onclick = () => selectImage(editedDataUrl.split(',')[1], editedPreview);
-                extractedPreview.onclick = () => selectImage(data.image, extractedPreview);
             }
 
-            editedImage = editedDataUrl.split(',')[1];
-            const editedImgDisplay = document.getElementById('editedImageDisplay');
-            editedImgDisplay.src = editedDataUrl;
-            const layerSetupPreview = document.getElementById('layerSetupPreview');
-            layerSetupPreview.src = editedDataUrl;
-            layerSetupPreview.style.display = 'block';
+            const canvas = document.getElementById('canvas');
+            const ctx = canvas.getContext('2d');
+            const img = new Image();
+            img.onload = () => {
+                ctx.clearRect(0, 0, canvas.width, canvas.height);
+                ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+                undoStack = [];
+                redoStack = [];
+                updateHistoryButtons();
+            };
+            img.src = editedDataUrl;
 
-            const imagesDiv = document.getElementById('images');
-            imagesDiv.innerHTML = '';
-            imagesDiv.style.display = 'none';
-
-            const uploadedSourceName = (uploadEditorFile.name || 'uploaded_image').replace(/\.[^.]+$/, '');
-            initialPrompt = initialPrompt || uploadedSourceName;
-            selectImage(data.image, document.getElementById('uploadExtractedPreview'));
             document.getElementById('selectionSection').style.display = 'block';
-            document.getElementById('uploadStatus').textContent = 'Edited image finished. Left is your edited upload, right is the extracted result.';
+            document.getElementById('selectionStepTitle').textContent = 'Step 3: Detailed Editing';
+            const drawingTitle = document.getElementById('drawingStepTitle');
+            if (drawingTitle) {
+                drawingTitle.textContent = '';
+                drawingTitle.style.display = 'none';
+            }
+            document.getElementById('drawingSection').style.display = 'block';
+            // Show Done button and disable upload controls when entering Step 3
+            try { document.getElementById('editDone').style.display = 'block'; } catch (e) {}
+            try { setUploadControlsEnabled(false); } catch (e) {}
+            try { document.getElementById('editDone').scrollIntoView({behavior: 'smooth', block: 'center'}); } catch (e) {}
+            document.getElementById('colorSelectionSection').style.display = 'none';
+            document.getElementById('modeSelection').style.display = 'none';
+            document.getElementById('layerSetup').style.display = 'none';
+            document.getElementById('layersHeader').style.display = 'none';
+            document.getElementById('selectionSection2').style.display = 'none';
+            document.getElementById('generateSTL').style.display = 'none';
+            document.getElementById('images').style.display = 'none';
+            document.getElementById('uploadStatus').textContent = 'Step 3: Use the brush or paint bucket to refine the uploaded image.';
+            const stepCanvas = document.getElementById('canvas');
+            stepCanvas.style.display = 'block';
+            const preparedImage = new Image();
+            preparedImage.onload = () => {
+                const maxDimension = 900;
+                const scale = Math.min(1, maxDimension / Math.max(preparedImage.naturalWidth, preparedImage.naturalHeight));
+                stepCanvas.width = Math.max(1, Math.round(preparedImage.naturalWidth * scale));
+                stepCanvas.height = Math.max(1, Math.round(preparedImage.naturalHeight * scale));
+                const ctx = stepCanvas.getContext('2d');
+                ctx.clearRect(0, 0, stepCanvas.width, stepCanvas.height);
+                ctx.drawImage(preparedImage, 0, 0, stepCanvas.width, stepCanvas.height);
+                undoStack = [];
+                redoStack = [];
+                updateHistoryButtons();
+            };
+            preparedImage.src = editedDataUrl;
             hideUploadEditor();
+
+            return { editedDataUrl, originalDataUrl };
         }
 
         function setImageSourceMode(mode) {
             currentImageSource = mode;
             const aiPanel = document.getElementById('aiGenerationPanel');
             const uploadPanel = document.getElementById('uploadGenerationPanel');
-            const aiBtn = document.getElementById('aiModeBtn');
-            const uploadBtn = document.getElementById('uploadModeBtn');
-            const thumb = document.getElementById('modeSwitchThumb');
             const uploadStatus = document.getElementById('uploadStatus');
 
             resetWorkflowStateForNewImageSource();
 
-            if (mode === 'upload') {
+            if (uploadPanel) {
+                uploadPanel.style.display = 'block';
+            }
+            if (aiPanel) {
                 aiPanel.style.display = 'none';
                 aiPanel.innerHTML = '';
-                uploadPanel.style.display = 'block';
-                aiBtn.classList.remove('is-active');
-                aiBtn.classList.add('is-inactive');
-                uploadBtn.classList.remove('is-inactive');
-                uploadBtn.classList.add('is-active');
-                thumb.style.transform = 'translateX(100%)';
-                thumb.style.background = 'linear-gradient(135deg, #27ae60 0%, #1f8f4e 100%)';
+            }
+            if (uploadStatus) {
                 uploadStatus.style.display = 'block';
                 uploadStatus.textContent = 'Upload an image to extract the main subject.';
-            } else {
-                aiPanel.style.display = 'block';
-                aiPanel.innerHTML = aiGenerationMarkup;
-                uploadPanel.style.display = 'none';
-                aiBtn.classList.remove('is-inactive');
-                aiBtn.classList.add('is-active');
-                uploadBtn.classList.remove('is-active');
-                uploadBtn.classList.add('is-inactive');
-                thumb.style.transform = 'translateX(0%)';
-                thumb.style.background = 'linear-gradient(135deg, #667eea 0%, #4c63d2 100%)';
-                document.getElementById('generate').addEventListener('click', handleAiGenerate);
             }
+        }
+
+        function stopCameraStream() {
+            if (cameraStream) {
+                cameraStream.getTracks().forEach((track) => track.stop());
+                cameraStream = null;
+            }
+            const video = document.getElementById('cameraPreviewVideo');
+            if (video) {
+                video.pause();
+                video.srcObject = null;
+            }
+        }
+
+        function closeCameraCapture() {
+            stopCameraStream();
+            const overlay = document.getElementById('cameraCaptureOverlay');
+            if (overlay) {
+                overlay.style.display = 'none';
+            }
+            const takeBtn = document.getElementById('cameraTakePhotoBtn');
+            const useBtn = document.getElementById('cameraUsePhotoBtn');
+            const retakeBtn = document.getElementById('cameraRetakeBtn');
+            if (takeBtn) takeBtn.style.display = 'inline-block';
+            if (useBtn) useBtn.style.display = 'none';
+            if (retakeBtn) retakeBtn.style.display = 'none';
+            cameraCapturedDataUrl = null;
+        }
+
+        async function openCameraCapture() {
+            if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+                alert('This browser does not support camera capture. Please use Choose File instead.');
+                return;
+            }
+            if (!selectedGroupNumber) {
+                alert('Please choose your group number before continuing.');
+                const groupSection = document.getElementById('groupSelectionSection');
+                if (groupSection) {
+                    groupSection.scrollIntoView({ behavior: 'smooth', block: 'start' });
+                }
+                return;
+            }
+
+            const overlay = document.getElementById('cameraCaptureOverlay');
+            if (overlay) overlay.style.display = 'flex';
+
+            const status = document.getElementById('uploadStatus');
+            if (status) {
+                status.style.display = 'block';
+                status.textContent = 'Camera ready. Take the photo and confirm it.';
+            }
+
+            try {
+                stopCameraStream();
+                const stream = await navigator.mediaDevices.getUserMedia({
+                    video: {
+                        facingMode: { ideal: 'environment' },
+                        width: { ideal: 1280 },
+                        height: { ideal: 960 }
+                    },
+                    audio: false
+                });
+                cameraStream = stream;
+                const video = document.getElementById('cameraPreviewVideo');
+                if (video) {
+                    video.srcObject = stream;
+                    await video.play();
+                }
+                const takeBtn = document.getElementById('cameraTakePhotoBtn');
+                const useBtn = document.getElementById('cameraUsePhotoBtn');
+                const retakeBtn = document.getElementById('cameraRetakeBtn');
+                if (takeBtn) takeBtn.style.display = 'inline-block';
+                if (useBtn) useBtn.style.display = 'none';
+                if (retakeBtn) retakeBtn.style.display = 'none';
+            } catch (error) {
+                console.error('Camera access error:', error);
+                closeCameraCapture();
+                alert('Camera access was blocked or unavailable. Please use Choose File instead.');
+            }
+        }
+
+        function captureCameraPhoto() {
+            const video = document.getElementById('cameraPreviewVideo');
+            const canvas = document.getElementById('cameraCaptureCanvas');
+            if (!video || !canvas) return;
+
+            const width = video.videoWidth || 1280;
+            const height = video.videoHeight || 960;
+            canvas.width = width;
+            canvas.height = height;
+            const ctx = canvas.getContext('2d');
+            ctx.drawImage(video, 0, 0, width, height);
+            cameraCapturedDataUrl = canvas.toDataURL('image/png');
+
+            const takeBtn = document.getElementById('cameraTakePhotoBtn');
+            const useBtn = document.getElementById('cameraUsePhotoBtn');
+            const retakeBtn = document.getElementById('cameraRetakeBtn');
+            if (takeBtn) takeBtn.style.display = 'none';
+            if (useBtn) useBtn.style.display = 'inline-block';
+            if (retakeBtn) retakeBtn.style.display = 'inline-block';
+        }
+
+        async function confirmCameraPhoto() {
+            if (!cameraCapturedDataUrl) {
+                alert('Please take a photo first.');
+                return;
+            }
+            closeCameraCapture();
+
+            const status = document.getElementById('uploadStatus');
+            if (status) {
+                status.style.display = 'block';
+                status.textContent = 'Opening the image editor...';
+            }
+
+            const fileName = `camera_capture_${Date.now()}.png`;
+            const dataUri = cameraCapturedDataUrl;
+            const byteString = atob(dataUri.split(',')[1]);
+            const bytes = new Uint8Array(byteString.length);
+            for (let i = 0; i < byteString.length; i++) {
+                bytes[i] = byteString.charCodeAt(i);
+            }
+            const blob = new Blob([bytes], { type: 'image/png' });
+            const file = new File([blob], fileName, { type: 'image/png' });
+            await openUploadEditorFromFile(file, 'Opening camera');
         }
 
         document.addEventListener('DOMContentLoaded', () => {
-            setImageSourceMode('ai');
-        });
+            // Initialize state but don't show Step 2 until a group is selected
+            resetWorkflowStateForNewImageSource();
 
-        async function handleAiGenerate() {
-            const generateBtn = document.getElementById('generate');
-            const prompt = document.getElementById('prompt').value;
-            const status = document.getElementById('aiStatus');
-            if (!prompt.trim()) {
-                alert('Please enter a prompt');
-                return;
-            }
+            const uploadInput = document.getElementById('uploadImageInput');
+            const filePickerLabel = document.querySelector('#uploadImageInput + label.file-picker-btn');
+            const launchUploadEditor = async (file, sourceLabel) => {
+                if (!file) return;
 
-            if (!initialPrompt) {
-                initialPrompt = prompt.trim();
-            }
-            
-            const imagesDiv = document.getElementById('images');
-            imagesDiv.innerHTML = '';
-            status.textContent = 'Starting generation...';
-            generateBtn.disabled = true;
-            
-            let firstImageShown = false;
-            let remainingImages = 4;
+                if (!selectedGroupNumber) {
+                    alert('Please choose your group number before continuing.');
+                    const groupSection = document.getElementById('groupSelectionSection');
+                    if (groupSection) {
+                        groupSection.scrollIntoView({ behavior: 'smooth', block: 'start' });
+                    }
+                    if (uploadInput) uploadInput.value = '';
+                    if (filePickerLabel) filePickerLabel.textContent = 'Choose File';
+                    return;
+                }
 
-            for (let i = 0; i < 4 && remainingImages > 0; i++) {
-                status.textContent = `Generating image ${i + 1}/4...`;
+                const status = document.getElementById('uploadStatus');
+                const uploadBtn = document.getElementById('uploadImageBtn');
+                uploadBtn.disabled = true;
+                status.style.display = 'block';
+                status.textContent = `${sourceLabel || 'Opening'} the image editor...`;
+
                 try {
-                    const response = await fetch('/generate_images', {
-                        method: 'POST',
-                        headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({ prompt })
-                    });
-                    const data = await response.json();
-
-                    if (response.status === 503) {
-                        status.textContent = data.error || 'Server is busy right now.';
-                        break;
-                    }
-                    
-                    if (data.image) {
-                        const imgElement = document.createElement('img');
-                        imgElement.src = 'data:image/png;base64,' + data.image;
-                        imgElement.onclick = () => selectImage(data.image, imgElement);
-                        imagesDiv.appendChild(imgElement);
-                        remainingImages = typeof data.remaining_images === 'number' ? data.remaining_images : Math.max(0, remainingImages - 1);
-                        if (!firstImageShown) {
-                            document.getElementById('selectionSection').style.display = 'block';
-                            status.textContent = 'First image ready—click one to edit while others generate.';
-                            firstImageShown = true;
-                        }
-                        if (remainingImages <= 0) {
-                            status.textContent = 'Image limit reached for this session. You can select from the images already generated.';
-                            generateBtn.disabled = true;
-                            break;
-                        }
-                    } else {
-                        status.textContent = `Failed to generate image ${i+1}`;
-                        break;
-                    }
+                    setImageSourceMode('upload');
+                    await openUploadEditorFromFile(file);
+                    status.textContent = 'Edit the image, then click Finish to extract it.';
                 } catch (error) {
                     console.error('Error:', error);
-                    status.textContent = 'Error generating images';
-                    break;
+                    status.textContent = 'Error processing uploaded image';
+                    alert('Error: ' + error.message);
+                } finally {
+                    uploadBtn.disabled = false;
                 }
+            };
+
+            if (uploadInput && filePickerLabel) {
+                uploadInput.addEventListener('change', async () => {
+                    const file = uploadInput.files && uploadInput.files[0];
+                    filePickerLabel.textContent = file ? file.name : 'Choose File';
+                    await launchUploadEditor(file, 'Opening');
+                    if (!file) return;
+                    uploadInput.value = '';
+                    filePickerLabel.textContent = 'Choose File';
+                });
             }
 
-            if (imagesDiv.children.length > 0) {
-                document.getElementById('selectionSection').style.display = 'block';
-                if (remainingImages > 0) {
-                    status.textContent = 'All images generated! Select one to continue.';
-                }
-            }
+            document.querySelectorAll('.group-choice-btn').forEach((button) => {
+                button.addEventListener('click', () => {
+                    selectedGroupNumber = button.dataset.group;
+                    document.querySelectorAll('.group-choice-btn').forEach((btn) => {
+                        const isSelected = btn.dataset.group === selectedGroupNumber;
+                        btn.style.background = isSelected
+                            ? 'linear-gradient(135deg, #d98d2a 0%, #b85d1e 100%)'
+                            : 'linear-gradient(135deg, #fff7ec 0%, #f4d8a8 100%)';
+                        btn.style.color = isSelected ? '#fffdf9' : '#5a3415';
+                        btn.style.borderColor = isSelected ? '#b85d1e' : '#d98d2a';
+                        btn.style.transform = isSelected ? 'translateY(-2px) scale(1.04)' : 'translateY(0) scale(1)';
+                        btn.style.boxShadow = isSelected
+                            ? '0 8px 18px rgba(185, 103, 28, 0.28)'
+                            : '0 4px 10px rgba(180, 118, 34, 0.18)';
+                    });
 
-            if (remainingImages > 0) {
-                generateBtn.disabled = false;
-            }
-        }
+                    const status = document.getElementById('groupSelectionStatus');
+                    if (status) {
+                        status.style.display = 'block';
+                        status.textContent = `Group selected: ${selectedGroupNumber}`;
+                    }
 
-        document.getElementById('aiModeBtn').addEventListener('click', () => setImageSourceMode('ai'));
-        document.getElementById('uploadModeBtn').addEventListener('click', () => setImageSourceMode('upload'));
+                    // Reveal Step 2 (upload) after group selection and enable controls
+                    const uploadPanel = document.getElementById('uploadGenerationPanel');
+                    if (uploadPanel) uploadPanel.style.display = 'block';
+                    try { setUploadControlsEnabled(true); } catch (e) {}
+                    // Scroll to upload area to guide the user
+                    try { uploadPanel.scrollIntoView({ behavior: 'smooth', block: 'start' }); } catch (e) {}
+                });
+            });
+        });
 
-        document.getElementById('uploadImageBtn').addEventListener('click', async () => {
-            const uploadInput = document.getElementById('uploadImageInput');
-            const status = document.getElementById('uploadStatus');
-            const uploadBtn = document.getElementById('uploadImageBtn');
-            const file = uploadInput.files && uploadInput.files[0];
+        document.getElementById('uploadImageBtn').addEventListener('click', () => {
+            openCameraCapture();
+        });
 
-            if (!file) {
-                alert('Please choose an image to upload.');
-                return;
-            }
+        document.getElementById('cameraCaptureCloseBtn').addEventListener('click', () => {
+            closeCameraCapture();
+        });
 
-            setImageSourceMode('upload');
-            status.style.display = 'block';
-            status.textContent = 'Opening the image editor...';
-            uploadBtn.disabled = true;
+        document.getElementById('cameraTakePhotoBtn').addEventListener('click', () => {
+            captureCameraPhoto();
+        });
 
-            try {
-                await openUploadEditorFromFile(file);
-                status.textContent = 'Edit the image, then click Finish to extract it.';
-            } catch (error) {
-                console.error('Error:', error);
-                status.textContent = 'Error processing uploaded image';
-                alert('Error: ' + error.message);
-            } finally {
-                uploadBtn.disabled = false;
-            }
+        document.getElementById('cameraRetakeBtn').addEventListener('click', () => {
+            cameraCapturedDataUrl = null;
+            const takeBtn = document.getElementById('cameraTakePhotoBtn');
+            const useBtn = document.getElementById('cameraUsePhotoBtn');
+            const retakeBtn = document.getElementById('cameraRetakeBtn');
+            if (takeBtn) takeBtn.style.display = 'inline-block';
+            if (useBtn) useBtn.style.display = 'none';
+            if (retakeBtn) retakeBtn.style.display = 'none';
+        });
+
+        document.getElementById('cameraUsePhotoBtn').addEventListener('click', async () => {
+            await confirmCameraPhoto();
         });
 
         document.getElementById('uploadBrightness').addEventListener('input', (event) => {
@@ -1772,7 +2026,7 @@
         document.getElementById('uploadResetAdjustmentsBtn').addEventListener('click', () => {
             uploadEditorState.brightness = 0;
             uploadEditorState.contrast = 0;
-            uploadEditorState.crop = null;
+            uploadEditorState.crop = createDefaultUploadCrop();
             updateUploadEditorValues();
             drawUploadEditorPreview();
         });
@@ -1793,7 +2047,7 @@
             try {
                 finishBtn.disabled = true;
                 status.style.display = 'block';
-                status.textContent = 'Extracting the edited image...';
+                status.textContent = 'Opening edit tools...';
                 await finishUploadEditor();
             } catch (error) {
                 console.error('Error:', error);
@@ -1912,7 +2166,6 @@
             }
         });
 
-        // Select Image
         function selectImage(img, imgElement) {
             selectedImage = img;
             document.querySelectorAll('#images img.selected').forEach(el => {
@@ -1925,29 +2178,22 @@
             document.getElementById('modeSelection').style.display = 'block';
             document.getElementById('select').style.display = 'none';
         }
-        
-        // Mode Selection Handlers
-        document.getElementById('fastGenerateBtn').addEventListener('click', async () => {
-            // Directly generate with default settings: 60mm length, 2mm height
+
+        async function generateFastStlWithName(imageData, downloadName) {
             const status = document.getElementById('workflowStatus');
-            const btn = document.getElementById('fastGenerateBtn');
-            
-            // Show loading state
-            const originalText = btn.innerHTML;
-            btn.innerHTML = '<span style="font-size: 24px;">⏳</span><span style="font-weight: 700;">Generating STL...</span><span style="font-size: 12px; font-weight: 400; opacity: 0.9;">Please wait</span>';
-            btn.disabled = true;
-            btn.style.opacity = '0.7';
+            if (!status) return;
+
             status.style.display = 'block';
-            status.textContent = '⚙️ Fast generating STL... Please wait.';
-            
+            status.textContent = '⚙️ Generating STL... Please wait.';
+
             try {
                 const response = await fetch('/fast_generate_stl', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({
-                        image: selectedImage,
-                        height: 2.0,  // Fixed 2mm height
-                        download_name: `${getModelFilenameStem()}.stl`
+                        image: imageData,
+                        height: 2.0,
+                        download_name: downloadName
                     })
                 });
 
@@ -1962,29 +2208,50 @@
                 if (!response.ok) {
                     throw new Error((data && data.error) ? data.error : responseText || `Server returned ${response.status}`);
                 }
-                
+
                 if (data.error) {
                     alert('Error: ' + data.error);
                     status.textContent = 'Error generating STL';
-                } else {
-                    status.textContent = '✅ STL generated successfully!';
-                    const blob = base64ToBlob(data.stl_file, 'application/octet-stream');
-                    const url = URL.createObjectURL(blob);
-                    const a = document.createElement('a');
-                    a.href = url;
-                    a.download = `${getModelFilenameStem()}.stl`;
-                    a.click();
-                    URL.revokeObjectURL(url);
+                    return;
                 }
+
+                status.textContent = '✅ STL generated successfully!';
+                const blob = base64ToBlob(data.stl_file, 'application/octet-stream');
+                const url = URL.createObjectURL(blob);
+                const a = document.createElement('a');
+                a.href = url;
+                a.download = downloadName;
+                a.click();
+                URL.revokeObjectURL(url);
             } catch (error) {
                 console.error('Error:', error);
                 status.textContent = 'Error generating STL';
                 alert('Error: ' + error.message);
-            } finally {
-                btn.innerHTML = originalText;
-                btn.disabled = false;
-                btn.style.opacity = '1';
             }
+        }
+        
+        // Mode Selection Handlers
+        document.getElementById('fastGenerateBtn').addEventListener('click', async () => {
+            const downloadName = `${getModelFilenameStem()}.stl`;
+            await generateFastStlWithName(selectedImage, downloadName);
+        });
+
+        document.querySelectorAll('.color-choice-btn').forEach((button) => {
+            button.addEventListener('click', () => {
+                selectedPrintColor = button.dataset.color || 'white';
+                document.querySelectorAll('.color-choice-btn').forEach((btn) => {
+                    const isSelected = btn === button;
+                    btn.style.boxShadow = isSelected ? '0 0 0 3px rgba(39, 174, 96, 0.2)' : 'none';
+                    btn.style.transform = isSelected ? 'translateY(-1px)' : 'none';
+                    btn.style.borderColor = isSelected ? '#27ae60' : (btn.dataset.color === 'white' ? '#dbe1ea' : btn.dataset.color === 'pink' ? '#f9a8d4' : btn.dataset.color === 'purple' ? '#c4b5fd' : '#fcd34d');
+                });
+            });
+        });
+
+        document.getElementById('generateColorStlBtn').addEventListener('click', async () => {
+            const groupLabel = selectedGroupNumber ? `Group${selectedGroupNumber}` : 'Group1';
+            const downloadName = `${groupLabel}_${selectedPrintColor}.stl`;
+            await generateFastStlWithName(selectedImage, downloadName);
         });
         
         document.getElementById('manualEditBtn').addEventListener('click', () => {
@@ -2027,6 +2294,10 @@
             document.getElementById('drawingSection').style.display = 'block';
             canvas.style.display = 'block';
             document.getElementById('editDone').style.display = 'block';
+            // Disable uploading controls once in step 3
+            try { setUploadControlsEnabled(false); } catch (e) { /* ignore */ }
+            // Ensure Done button is visible
+            try { document.getElementById('editDone').scrollIntoView({behavior: 'smooth', block: 'center'}); } catch (e) {}
         });
 
         // Drawing Functions
@@ -2236,44 +2507,27 @@
         });
 
         // Done Editing
-        document.getElementById('editDone').addEventListener('click', () => {
-            editedImage = canvas.toDataURL().split(',')[1];
+        document.getElementById('editDone').addEventListener('click', async () => {
+            const currentEditedDataUrl = canvas.toDataURL('image/png');
             const editedImgDisplay = document.getElementById('editedImageDisplay');
-            editedImgDisplay.src = canvas.toDataURL();
-            // Keep editedImageDisplay hidden (used only as reference for selection canvas)
-            
-            // Show preview in layer setup
-            const layerSetupPreview = document.getElementById('layerSetupPreview');
-            layerSetupPreview.src = canvas.toDataURL();
-            layerSetupPreview.style.display = 'block';
-            
-            document.getElementById('drawingSection').style.display = 'none';
-            document.getElementById('layerSetup').style.display = 'block';
-        });
+            editedImgDisplay.src = currentEditedDataUrl;
 
-        // Back to Image Selection
-        document.getElementById('backToImages').addEventListener('click', () => {
-            if (confirm('This will discard your current edits. Continue?')) {
-                document.getElementById('drawingSection').style.display = 'none';
-                document.getElementById('selectionSection').style.display = 'block';
-                document.getElementById('images').style.display = 'grid';
-                document.getElementById('select').style.display = 'block';
-                // Clear canvas and selections
-                const ctx = canvas.getContext('2d');
-                ctx.clearRect(0, 0, canvas.width, canvas.height);
-                undoStack = [];
-                redoStack = [];
-                updateHistoryButtons();
+            selectedImage = currentEditedDataUrl.split(',')[1];
+            document.getElementById('colorSelectionSection').style.display = 'block';
+            document.getElementById('selectionSection').style.display = 'block';
+            document.getElementById('selectionStepTitle').textContent = 'Step 4: Choose a Color';
+            document.getElementById('uploadStatus').textContent = 'Step 4: Choose a color and generate the STL file.';
+
+            const defaultColorBtn = document.querySelector('.color-choice-btn[data-color="white"]');
+            if (defaultColorBtn) {
+                selectedPrintColor = 'white';
+                document.querySelectorAll('.color-choice-btn').forEach((btn) => {
+                    const isSelected = btn === defaultColorBtn;
+                    btn.style.boxShadow = isSelected ? '0 0 0 3px rgba(39, 174, 96, 0.2)' : 'none';
+                    btn.style.transform = isSelected ? 'translateY(-1px)' : 'none';
+                    btn.style.borderColor = isSelected ? '#27ae60' : (btn.dataset.color === 'white' ? '#dbe1ea' : btn.dataset.color === 'pink' ? '#f9a8d4' : btn.dataset.color === 'purple' ? '#c4b5fd' : '#fcd34d');
+                });
             }
-        });
-
-        // Back to Edit
-        document.getElementById('backToEdit').addEventListener('click', () => {
-            document.getElementById('layerSetup').style.display = 'none';
-            document.getElementById('layers').innerHTML = '';
-            document.getElementById('selectionSection2').style.display = 'none';
-            document.getElementById('generateSTL').style.display = 'none';
-            document.getElementById('drawingSection').style.display = 'block';
         });
 
         // Set Layers
