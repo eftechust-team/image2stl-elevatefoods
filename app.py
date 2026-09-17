@@ -96,6 +96,11 @@ def is_supabase_upload_enabled():
     return bool(SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY and SUPABASE_STORAGE_BUCKET)
 
 
+def is_probable_jwt(value):
+    parts = str(value or '').strip().split('.')
+    return len(parts) == 3 and all(parts)
+
+
 def sanitize_storage_filename(filename):
     safe_name = re.sub(r'[^A-Za-z0-9._-]+', '_', str(filename or '').strip())
     safe_name = re.sub(r'_+', '_', safe_name).strip('._')
@@ -111,6 +116,12 @@ def supabase_public_url(object_path):
 def upload_bytes_to_supabase(object_path, payload, content_type='application/octet-stream'):
     if not is_supabase_upload_enabled():
         raise RuntimeError('Supabase upload is not configured.')
+
+    if not is_probable_jwt(SUPABASE_SERVICE_ROLE_KEY):
+        raise RuntimeError(
+            'Supabase upload failed: SUPABASE_SERVICE_ROLE_KEY is not a valid service-role JWT. '
+            'Paste the raw key from Supabase with no quotes, spaces, or line breaks.'
+        )
 
     encoded_bucket = quote(SUPABASE_STORAGE_BUCKET, safe='')
     encoded_object_path = '/'.join(quote(segment, safe='') for segment in object_path.split('/'))
@@ -128,7 +139,13 @@ def upload_bytes_to_supabase(object_path, payload, content_type='application/oct
     )
 
     if response.status_code not in (200, 201):
-        raise RuntimeError(f'Supabase upload failed ({response.status_code}): {response.text}')
+        response_text = response.text
+        if response.status_code == 403 and 'InvalidCompactJWS' in response_text:
+            raise RuntimeError(
+                'Supabase upload failed (403): the service-role key is invalid or copied incorrectly. '
+                'Use the raw JWT from Supabase, with no surrounding quotes or extra whitespace.'
+            )
+        raise RuntimeError(f'Supabase upload failed ({response.status_code}): {response_text}')
 
     return {
         'bucket': SUPABASE_STORAGE_BUCKET,
