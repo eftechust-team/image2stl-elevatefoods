@@ -792,6 +792,18 @@
             border-radius: 10px;
         }
 
+        .upload-editor-action-btn {
+            flex: 0 1 150px !important;
+            min-width: 0 !important;
+            padding: 10px 14px !important;
+            font-size: 13px !important;
+            border-radius: 10px !important;
+        }
+
+        .upload-editor-action-btn-primary {
+            background: #27ae60 !important;
+        }
+
         .group-selection-grid,
         .color-selection-grid {
             display: flex;
@@ -1032,6 +1044,12 @@
                 font-size: 13px;
             }
 
+            .upload-editor-action-btn {
+                flex: 1 1 120px !important;
+                padding: 9px 11px !important;
+                font-size: 12px !important;
+            }
+
             .group-selection-grid,
             .color-selection-grid {
                 gap: 10px;
@@ -1141,6 +1159,15 @@
                 border-radius: 9px;
             }
 
+            .upload-editor-action-btn {
+                flex: 1 1 100% !important;
+                width: 100% !important;
+                min-height: 36px !important;
+                padding: 7px 10px !important;
+                font-size: 11px !important;
+                border-radius: 9px !important;
+            }
+
             .group-selection-grid,
             .color-selection-grid {
                 gap: 8px;
@@ -1205,8 +1232,8 @@
             <h2>Step 2: Upload Image</h2>
             <div id="uploadGenerationPanel" style="display: none;">
                 <div class="info-box" style="background: #fff5e9; border-left-color: #d98d2a; margin-bottom: 15px;">
-                    <p style="margin: 0; color: #6d4317; font-weight: 700;">Take a photo with your camera or choose an existing image with a white background and a black subject.</p>
-                    <p style="margin: 8px 0 0 0; color: #7d521d; font-size: 13px;">The app will extract the main dark part and suppress softer shadows from camera photos.</p>
+                    <p style="margin: 0; color: #6d4317; font-weight: 700;">Choose an image with a white background and a black subject.</p>
+                    <p style="margin: 8px 0 0 0; color: #7d521d; font-size: 13px;">The app will extract the main dark part and suppress softer shadows from the uploaded image.</p>
                 </div>
                 <div class="input-group">
                     <div class="file-picker-wrap">
@@ -1214,7 +1241,7 @@
                         <label class="file-picker-btn" for="uploadImageInput">Choose File</label>
                     </div>
                 </div>
-                <div id="uploadStatus" class="status" style="margin-top: 0; display: block;">Take a photo or upload an image to extract the main subject.</div>
+                <div id="uploadStatus" class="status" style="margin-top: 0; display: block;">Choose an image to extract the main subject.</div>
                 <div id="uploadComparePanel" class="upload-compare-panel"></div>
             </div>
             <div id="images"></div>
@@ -1485,9 +1512,9 @@
                     </div>
                     <div class="upload-editor-group">
                         <div class="upload-editor-actions" style="display:flex; flex-wrap:wrap; gap:10px;">
-                            <button id="uploadResetAdjustmentsBtn" type="button" class="danger-btn" style="flex:1 1 180px;">Reset Adjustments</button>
-                            <button id="uploadCancelEditBtn" type="button" class="danger-btn" style="flex:1 1 120px;">Cancel</button>
-                            <button id="uploadFinishEditBtn" type="button" style="flex:1 1 120px; background:#27ae60;">Finish</button>
+                            <button id="uploadResetAdjustmentsBtn" type="button" class="danger-btn upload-editor-action-btn">Reset Adjustments</button>
+                            <button id="uploadCancelEditBtn" type="button" class="danger-btn upload-editor-action-btn">Cancel</button>
+                            <button id="uploadFinishEditBtn" type="button" class="upload-editor-action-btn upload-editor-action-btn-primary">Finish</button>
                         </div>
                     </div>
                 </div>
