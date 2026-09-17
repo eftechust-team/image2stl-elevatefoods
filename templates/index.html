@@ -526,6 +526,95 @@
             border: 1px solid #dde3f0;
         }
 
+        .camera-capture-overlay {
+            position: fixed;
+            inset: 0;
+            display: none;
+            align-items: center;
+            justify-content: center;
+            padding: 24px;
+            background: rgba(9, 15, 28, 0.78);
+            backdrop-filter: blur(6px);
+            z-index: 2600;
+        }
+
+        .camera-capture-modal {
+            width: min(960px, 100%);
+            max-height: 92vh;
+            display: flex;
+            flex-direction: column;
+            gap: 14px;
+            overflow: hidden;
+            padding: 18px;
+            border-radius: 22px;
+            background: linear-gradient(180deg, #ffffff 0%, #f7f9ff 100%);
+            box-shadow: 0 30px 80px rgba(2, 6, 23, 0.48);
+            border: 1px solid rgba(102, 126, 234, 0.18);
+            transform-origin: center;
+            animation: camera-pop-in 180ms ease-out;
+        }
+
+        .camera-capture-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            gap: 16px;
+            flex-wrap: wrap;
+        }
+
+        .camera-capture-header h2 {
+            margin: 0;
+            color: #172033;
+        }
+
+        .camera-capture-body {
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            min-height: 0;
+            flex: 1 1 auto;
+            background: #0f172a;
+            border-radius: 16px;
+            overflow: hidden;
+            border: 1px solid rgba(148, 163, 184, 0.28);
+        }
+
+        #cameraPreviewVideo {
+            display: block;
+            width: 100%;
+            height: min(68vh, 560px);
+            max-height: 68vh;
+            object-fit: cover;
+            background: #000;
+        }
+
+        #cameraCaptureCanvas {
+            max-width: 100%;
+            height: auto;
+        }
+
+        .camera-capture-actions {
+            display: flex;
+            gap: 10px;
+            flex-wrap: wrap;
+            justify-content: center;
+        }
+
+        .camera-capture-actions button {
+            min-width: 140px;
+        }
+
+        @keyframes camera-pop-in {
+            from {
+                opacity: 0;
+                transform: translateY(18px) scale(0.96);
+            }
+            to {
+                opacity: 1;
+                transform: translateY(0) scale(1);
+            }
+        }
+
         .upload-editor-overlay {
             position: fixed;
             inset: 0;
@@ -696,8 +785,11 @@
         }
 
         .upload-editor-actions button {
-            flex: 1;
-            min-width: 120px;
+            flex: 0 1 150px;
+            min-width: 0;
+            padding: 10px 14px;
+            font-size: 13px;
+            border-radius: 10px;
         }
 
         .upload-editor-actions .danger-btn {
@@ -717,16 +809,22 @@
             display: none;
         }
 
-        @media (max-width: 900px) {
+            align-items: center;
             body {
                 padding-top: 68px;
             }
 
-            .top-header {
+            flex: 0 1 150px;
+            min-width: 0;
+            padding: 10px 14px;
+            font-size: 13px;
+            border-radius: 10px;
                 padding: 10px 12px;
                 gap: 12px;
             }
-
+                flex: 1 1 120px;
+                padding: 10px 12px;
+                font-size: 13px;
             .fixed-logo {
                 max-width: 140px;
             }
@@ -851,6 +949,32 @@
                 align-items: stretch;
             }
 
+            .camera-capture-overlay {
+                padding: 10px;
+                align-items: stretch;
+            }
+
+            .camera-capture-modal {
+                width: 100%;
+                max-height: 96vh;
+                padding: 12px;
+                border-radius: 18px;
+            }
+
+            .camera-capture-header {
+                align-items: flex-start;
+                flex-direction: column;
+            }
+
+            #cameraPreviewVideo {
+                height: min(62vh, 520px);
+                max-height: 62vh;
+            }
+
+            .camera-capture-actions button {
+                flex: 1 1 140px;
+            }
+
             .upload-editor-modal {
                 width: 100%;
                 max-height: 96vh;
@@ -888,7 +1012,9 @@
             }
 
             .upload-editor-actions button {
-                min-width: 0;
+                flex: 1 1 120px;
+                padding: 10px 12px;
+                font-size: 13px;
             }
         }
 
@@ -937,7 +1063,21 @@
                 border-radius: 14px;
             }
 
+            .camera-capture-modal {
+                padding: 10px;
+                border-radius: 14px;
+            }
+
+            #cameraPreviewVideo {
+                height: min(54vh, 420px);
+                max-height: 54vh;
+            }
+
             .upload-editor-header h2 {
+                font-size: 20px;
+            }
+
+            .camera-capture-header h2 {
                 font-size: 20px;
             }
 
@@ -949,6 +1089,28 @@
             .crop-hint,
             .upload-slider-row label,
             .upload-slider-value {
+                font-size: 12px;
+            }
+
+            .upload-editor-actions {
+                gap: 8px;
+            }
+
+            .upload-editor-actions button {
+                flex: 1 1 100%;
+                width: 100%;
+                padding: 10px 12px;
+                font-size: 12px;
+            }
+
+            .upload-editor-actions {
+                gap: 8px;
+            }
+
+            .upload-editor-actions button {
+                flex: 1 1 100%;
+                width: 100%;
+                padding: 10px 12px;
                 font-size: 12px;
             }
         }
@@ -2215,7 +2377,16 @@
                     return;
                 }
 
-                status.textContent = '✅ STL generated successfully!';
+                if (data.supabase_upload_error) {
+                    status.textContent = `⚠️ STL generated, but upload failed: ${data.supabase_upload_error}`;
+                    alert('STL was generated locally, but Supabase upload failed: ' + data.supabase_upload_error);
+                } else if (Array.isArray(data.uploaded_files) && data.uploaded_files.length > 0) {
+                    status.textContent = `✅ STL generated successfully and uploaded to Supabase (${data.uploaded_files.length} file${data.uploaded_files.length === 1 ? '' : 's'}).`;
+                } else if (data.supabase_upload_enabled) {
+                    status.textContent = '✅ STL generated successfully. Supabase upload is enabled, but no files were returned.';
+                } else {
+                    status.textContent = '✅ STL generated successfully!';
+                }
                 const blob = base64ToBlob(data.stl_file, 'application/octet-stream');
                 const url = URL.createObjectURL(blob);
                 const a = document.createElement('a');

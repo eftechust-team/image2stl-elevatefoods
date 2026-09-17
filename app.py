@@ -96,15 +96,18 @@ def sanitize_storage_filename(filename):
 
 
 def supabase_public_url(object_path):
+    encoded_bucket = quote(SUPABASE_STORAGE_BUCKET, safe='')
     encoded_path = '/'.join(quote(segment, safe='') for segment in object_path.split('/'))
-    return f'{SUPABASE_URL}/storage/v1/object/public/{SUPABASE_STORAGE_BUCKET}/{encoded_path}'
+    return f'{SUPABASE_URL}/storage/v1/object/public/{encoded_bucket}/{encoded_path}'
 
 
 def upload_bytes_to_supabase(object_path, payload, content_type='application/octet-stream'):
     if not is_supabase_upload_enabled():
         raise RuntimeError('Supabase upload is not configured.')
 
-    endpoint = f'{SUPABASE_URL}/storage/v1/object/{SUPABASE_STORAGE_BUCKET}/{object_path}'
+    encoded_bucket = quote(SUPABASE_STORAGE_BUCKET, safe='')
+    encoded_object_path = '/'.join(quote(segment, safe='') for segment in object_path.split('/'))
+    endpoint = f'{SUPABASE_URL}/storage/v1/object/{encoded_bucket}/{encoded_object_path}'
     response = http_session.post(
         endpoint,
         headers={
