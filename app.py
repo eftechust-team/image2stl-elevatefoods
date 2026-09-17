@@ -542,13 +542,21 @@ def generate_stl():
         supabase_error = None
         try:
             download_name = sanitize_storage_filename(data.get('download_name') or 'model.zip')
+            zip_name = download_name if download_name.lower().endswith('.zip') else f'{download_name}.zip'
+            base_name = zip_name[:-4] if zip_name.lower().endswith('.zip') else zip_name
             upload_entries = [
                 {
-                    'filename': download_name,
+                    'filename': zip_name,
                     'payload': zip_bytes,
                     'content_type': 'application/zip'
                 }
             ]
+            for stl_file in stl_files:
+                upload_entries.append({
+                    'filename': f'{base_name}_{stl_file["name"]}',
+                    'payload': stl_file['content'].encode('utf-8'),
+                    'content_type': 'model/stl'
+                })
             supabase_uploads = upload_generated_files_to_supabase(upload_entries, 'multi-layer')
         except Exception as upload_exc:
             supabase_error = str(upload_exc)
