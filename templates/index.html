@@ -1978,13 +1978,10 @@
             // Initialize state but don't show Step 2 until a group is selected
             resetWorkflowStateForNewImageSource();
 
+            const uploadInput = document.getElementById('uploadImageInput');
             const filePickerLabel = document.querySelector('#uploadImageInput + label.file-picker-btn');
             const launchUploadEditor = async (file, sourceLabel) => {
                 if (!file) return;
-                    if (uploadInput) uploadInput.value = '';
-                    if (filePickerLabel) filePickerLabel.textContent = 'Choose File';
-                    return;
-                }
 
                 const status = document.getElementById('uploadStatus');
                 status.style.display = 'block';
@@ -1998,8 +1995,6 @@
                     console.error('Error:', error);
                     status.textContent = 'Error processing uploaded image';
                     alert('Error: ' + error.message);
-                } finally {
-                    uploadBtn.disabled = false;
                 }
             };
 
