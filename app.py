@@ -158,10 +158,9 @@ def solidify_foreground_mask(mask_array, closing_size=3):
     return ndimage.binary_fill_holes(mask)
 
 
-def _render_mask_as_smooth_stl(mask_array, width, height, z_offset, thickness, max_dim=512, xy_upsample=2, surface_blur=0.85):
-    """Render a binary foreground mask as a padded smooth volume and export an STL.
-
-    This favors watertight output and softer edges over contour-by-contour extrusion.
+def _build_smooth_polygon_mesh(mask_array, width, height, z_offset, thickness, max_dim=512, xy_upsample=2, surface_blur=0.75):
+    """Convert a binary mask into a smooth watertight STL by extracting contours,
+    smoothing them, and extruding polygons directly.
     """
     if not np.any(mask_array):
         return "solid layer\nendsolid layer\n"
@@ -169,8 +168,7 @@ def _render_mask_as_smooth_stl(mask_array, width, height, z_offset, thickness, m
     mask = np.asarray(mask_array, dtype=bool)
     h, w = mask.shape
 
-    # Keep the problem size bounded, but slightly upsample smaller inputs so the
-    # block mesh follows a smoother silhouette than the raw pixel grid.
+    # Keep the contour extraction manageable and smooth the silhouette before tracing.
     scale_factor = 1.0
     target_max_dim = max(64, int(max_dim))
     if max(w, h) > target_max_dim:
@@ -180,45 +178,131 @@ def _render_mask_as_smooth_stl(mask_array, width, height, z_offset, thickness, m
 
     if scale_factor != 1.0:
         import skimage.transform as sk_transform
-        resized = sk_transform.resize(
+        mask_field = sk_transform.resize(
             mask.astype(float),
             (max(1, int(round(h * scale_factor))), max(1, int(round(w * scale_factor)))),
             order=1,
             anti_aliasing=True,
             preserve_range=True,
         )
-        mask_field = np.clip(resized, 0.0, 1.0)
     else:
         mask_field = mask.astype(float)
 
-    # A light blur creates smoother walls and removes the staircase effect.
     if surface_blur and surface_blur > 0:
         mask_field = ndimage.gaussian_filter(mask_field, sigma=float(surface_blur))
         mask_field = np.clip(mask_field, 0.0, 1.0)
 
-    # Solidify again after smoothing so we do not create tiny voids.
+    # Keep only the filled foreground after smoothing to avoid tiny islands/holes.
     mask_field = solidify_foreground_mask(mask_field > 0.5)
-    hs, ws = mask_field.shape
-
-    # Convert the smoothed mask into points and let the block-mesh generator
-    # emit only the exterior faces. This is slower than pure contour extrusion,
-    # but much more robust and still significantly smoother than the raw grid.
-    points = [(int(x), int(y)) for y, x in np.argwhere(mask_field)]
-    if not points:
+    if not np.any(mask_field):
         return "solid layer\nendsolid layer\n"
 
+    # Trace the smooth field into contours. A lower threshold retains the softened edge.
+    contours = measure.find_contours(mask_field.astype(float), 0.45)
+    if not contours:
+        return None
+
+    valid_contours = [c for c in contours if len(c) >= 8 and abs(polygon_area(c)) >= 6.0]
+    if not valid_contours:
+        return None
+
+    # Build outer/inner contour groups.
+    valid_sorted = sorted(valid_contours, key=lambda c: abs(polygon_area(c)), reverse=True)
+    assigned_as_hole = [False] * len(valid_sorted)
+    outer_with_holes = []
+    for i in range(len(valid_sorted)):
+        if assigned_as_hole[i]:
+            continue
+        holes_for_i = []
+        for j in range(i + 1, len(valid_sorted)):
+            if assigned_as_hole[j]:
+                continue
+            if contour_contains(valid_sorted[i], valid_sorted[j]):
+                assigned_as_hole[j] = True
+                holes_for_i.append(j)
+        outer_with_holes.append((i, holes_for_i))
+
+    try:
+        import trimesh
+        from shapely.geometry import Polygon
+    except Exception:
+        trimesh = None
+        Polygon = None
+
+    if trimesh is None or Polygon is None:
+        return None
+
     base_scale_mm = 50.0 / max(width, height)
-    xy_scale = base_scale_mm / max(scale_factor, 1e-6)
-    return generate_stl_from_points(
-        points,
-        ws,
-        hs,
-        z_offset,
-        thickness,
-        dilation=1,
-        block_size=2,
-        scale=xy_scale,
-    )
+    scale_mm = base_scale_mm / max(scale_factor, 1e-6)
+    meshes = []
+
+    for outer_idx, hole_indices in outer_with_holes:
+        outer_raw = valid_sorted[outer_idx]
+        outer_simplified = smooth_contour_spline(outer_raw, smoothing=0.01)
+        outer_simplified = simplify_contour(outer_simplified, epsilon=0.65)
+        outer_simplified = chaikin_smooth(outer_simplified, iterations=1)
+        if len(outer_simplified) < 3:
+            continue
+
+        outer_pts = np.array(outer_simplified, dtype=float)
+        outer_pts[:, 0] = (outer_pts[:, 0]) * scale_mm
+        outer_pts[:, 1] = (outer_pts[:, 1]) * scale_mm
+        outer_pts = ensure_ccw(outer_pts)
+
+        holes = []
+        for hi in hole_indices:
+            hole_raw = valid_sorted[hi]
+            hole_simplified = smooth_contour_spline(hole_raw, smoothing=0.01)
+            hole_simplified = simplify_contour(hole_simplified, epsilon=0.65)
+            hole_simplified = chaikin_smooth(hole_simplified, iterations=1)
+            if len(hole_simplified) < 3:
+                continue
+            hole_pts = np.array(hole_simplified, dtype=float)
+            hole_pts[:, 0] = hole_pts[:, 0] * scale_mm
+            hole_pts[:, 1] = hole_pts[:, 1] * scale_mm
+            hole_pts = ensure_ccw(hole_pts)[::-1]
+            holes.append([(float(pt[1]), float(pt[0])) for pt in hole_pts])
+
+        exterior = [(float(pt[1]), float(pt[0])) for pt in outer_pts]
+        try:
+            poly = Polygon(exterior, holes=holes if holes else None)
+            if not poly.is_valid:
+                poly = poly.buffer(0)
+            if poly.is_empty or poly.area <= 0:
+                continue
+            poly = poly.simplify(0.02, preserve_topology=True)
+            if poly.is_empty or poly.area <= 0:
+                continue
+
+            mesh = trimesh.creation.extrude_polygon(poly, thickness)
+            if mesh is None or len(mesh.vertices) == 0 or len(mesh.faces) == 0:
+                continue
+            if z_offset:
+                mesh.apply_translation([0, 0, z_offset])
+            meshes.append(mesh)
+        except Exception as exc:
+            print('polygon extrusion failed:', exc)
+            continue
+
+    if not meshes:
+        return None
+
+    combined = meshes[0] if len(meshes) == 1 else trimesh.util.concatenate(meshes)
+    if hasattr(combined, 'process'):
+        try:
+            combined.process(validate=True)
+        except Exception:
+            pass
+    if hasattr(combined, 'fill_holes'):
+        try:
+            combined.fill_holes()
+        except Exception:
+            pass
+
+    stl_bytes = combined.export(file_type='stl_ascii')
+    if isinstance(stl_bytes, bytes):
+        return stl_bytes.decode('utf-8', errors='ignore')
+    return str(stl_bytes)
 
 
 def sanitize_storage_filename(filename):
@@ -2011,7 +2095,10 @@ def create_triangle(v1, v2, v3):
 
 def generate_stl_marching_cubes(mask_array, width, height, z_offset, thickness, max_dim=512):
     """Generate a watertight STL from the mask using a padded smooth volume."""
-    return _render_mask_as_smooth_stl(mask_array, width, height, z_offset, thickness, max_dim=max_dim, xy_upsample=2, surface_blur=0.85)
+    stl = _build_smooth_polygon_mesh(mask_array, width, height, z_offset, thickness, max_dim=max_dim, xy_upsample=2, surface_blur=0.75)
+    if stl:
+        return stl
+    return generate_stl_from_points_fallback(mask_array, width, height, z_offset, thickness)
 
 
 def generate_stl_via_openscad(mask_array, width, height, z_offset, thickness, target_width_mm=50.0):
@@ -2163,12 +2250,15 @@ import("{svg_path.as_posix()}", center = false);
 
 
 def generate_stl_via_shapely(mask_array, width, height, z_offset, thickness, target_width_mm=50.0):
-    """Generate STL from the mask using the same smooth watertight volume pipeline."""
+    """Generate STL from the mask using a smoothed contour extrusion pipeline."""
     try:
         max_dim = 256 if max(width, height) <= 512 else 512
     except Exception:
         max_dim = 512
-    return _render_mask_as_smooth_stl(mask_array, width, height, z_offset, thickness, max_dim=max_dim, xy_upsample=2, surface_blur=0.75)
+    stl = _build_smooth_polygon_mesh(mask_array, width, height, z_offset, thickness, max_dim=max_dim, xy_upsample=2, surface_blur=0.65)
+    if stl:
+        return stl
+    return None
 
 if __name__ == '__main__':
     app.run(debug=os.getenv('FLASK_DEBUG', '').lower() in ('1', 'true', 'yes'), host='0.0.0.0', port=8080)
