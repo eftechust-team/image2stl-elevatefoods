@@ -101,6 +101,50 @@ def is_probable_jwt(value):
     return len(parts) == 3 and all(parts)
 
 
+def compute_dark_foreground_threshold(gray_array):
+    gray = np.asarray(gray_array, dtype=np.float32)
+    candidates = []
+
+    try:
+        candidates.append(float(filters.threshold_otsu(gray)) + 20.0)
+    except Exception:
+        pass
+
+    try:
+        candidates.append(float(np.percentile(gray, 5.0)) + 90.0)
+    except Exception:
+        pass
+
+    if not candidates:
+        threshold = 160.0
+    else:
+        threshold = max(candidates)
+
+    return int(min(225, max(100, threshold)))
+
+
+def build_dark_foreground_mask(gray_array, opening_size=2):
+    gray = np.asarray(gray_array, dtype=np.float32)
+    threshold = compute_dark_foreground_threshold(gray)
+
+    for _ in range(3):
+        mask = gray < threshold
+        if opening_size and opening_size > 1:
+            mask = ndimage.binary_opening(mask, structure=np.ones((opening_size, opening_size), dtype=bool))
+
+        coverage = float(np.mean(mask))
+        if coverage < 0.01 and threshold < 220:
+            threshold = min(220, threshold + 15)
+            continue
+        if coverage > 0.60 and threshold > 100:
+            threshold = max(100, threshold - 10)
+            continue
+
+        return mask
+
+    return mask
+
+
 def sanitize_storage_filename(filename):
     safe_name = re.sub(r'[^A-Za-z0-9._-]+', '_', str(filename or '').strip())
     safe_name = re.sub(r'_+', '_', safe_name).strip('._')
@@ -190,25 +234,9 @@ def extract_main_subject_image(image):
     gray = image.convert('L')
     gray_array = np.array(gray, dtype=np.float32)
 
-    # Use a conservative threshold for dark ink/pen strokes so the textured
-    # paper background and white interiors stay white.
-    try:
-        ink_floor = float(np.percentile(gray_array, 2.0))
-    except Exception:
-        ink_floor = 80.0
-
-    foreground_threshold = int(min(180, max(80, ink_floor + 60.0)))
-    dark_mask = gray_array < foreground_threshold
-
-    # Remove isolated specks only; do not close gaps or fill holes.
-    dark_mask = ndimage.binary_opening(dark_mask, structure=np.ones((2, 2)))
-    dark_mask = ndimage.binary_opening(dark_mask, structure=np.ones((2, 2)))
-
-    # If the mask is still too broad, tighten it once more instead of filling.
-    if np.mean(dark_mask) > 0.45:
-        foreground_threshold = int(max(70, foreground_threshold - 25))
-        dark_mask = gray_array < foreground_threshold
-        dark_mask = ndimage.binary_opening(dark_mask, structure=np.ones((2, 2)))
+    # Use a slightly more permissive threshold so dark gray phone-photo areas
+    # are preserved as foreground instead of being discarded as background.
+    dark_mask = build_dark_foreground_mask(gray_array, opening_size=2)
 
     output_array = np.where(dark_mask, 0, 255).astype(np.uint8)
     return Image.fromarray(output_array, mode='L')
@@ -309,12 +337,10 @@ def fast_generate_stl():
         image = image.convert('L')
         width, height = image.size
         
-        # Extract selected pixels (black/dark areas drawn by user)
-        image_array = np.array(image)
-        # Use a conservative threshold to capture true black strokes while avoiding filling small gaps
-        mask_array = image_array < 128
-        # Remove isolated specks but do not perform closing/filling to preserve holes and thin structures
-        mask_array = ndimage.binary_opening(mask_array, structure=np.ones((3, 3)))
+        # Extract selected pixels (black/dark areas drawn by user), including
+        # dark gray phone-photo areas that are still part of the subject.
+        image_array = np.array(image, dtype=np.float32)
+        mask_array = build_dark_foreground_mask(image_array, opening_size=2)
 
         # Try shapely+trimesh extrusion first (pure-Python), then OpenSCAD, then marching-cubes fallback
         stl_content = None
