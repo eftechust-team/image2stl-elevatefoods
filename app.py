@@ -188,37 +188,35 @@ def render_fast_contour_stl(mask_array, width, height, z_offset, thickness, max_
     mask_f = mask_f > 0.5
 
     try:
-        import cv2
         import trimesh
         from shapely.geometry import Polygon
     except Exception:
-        cv2 = None
-        trimesh = None
-        Polygon = None
+        return None
 
-    if cv2 is None or trimesh is None or Polygon is None:
-        return generate_stl_from_points_fallback(mask_f, width, height, z_offset, thickness)
-
-    mask_img = (mask_f.astype(np.uint8) * 255)
-    contours, _ = cv2.findContours(mask_img, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+    contours = measure.find_contours(mask_f.astype(float), 0.5)
     if not contours:
-        return generate_stl_from_points_fallback(mask_f, width, height, z_offset, thickness)
+        return None
 
     base_scale_mm = 50.0 / max(width, height)
     xy_scale = base_scale_mm / max(scale_factor, 1e-6)
     meshes = []
 
     for cnt in contours:
-        area = abs(cv2.contourArea(cnt))
+        if cnt is None or len(cnt) < 4:
+            continue
+        area = abs(polygon_area(cnt))
         if area < 12:
             continue
-        perimeter = cv2.arcLength(cnt, True)
-        epsilon = max(1.0, 0.01 * perimeter)
-        approx = cv2.approxPolyDP(cnt, epsilon, True)
-        if approx is None or len(approx) < 3:
+
+        pts = simplify_contour(cnt, epsilon=0.8)
+        if len(pts) < 3:
+            continue
+        pts = chaikin_smooth(pts, iterations=1)
+        pts = smooth_contour_spline(pts, smoothing=0.002)
+        if len(pts) < 3:
             continue
 
-        pts = approx.reshape(-1, 2).astype(float)
+        pts = np.asarray(pts, dtype=float)
         pts[:, 0] = pts[:, 0] * xy_scale
         pts[:, 1] = pts[:, 1] * xy_scale
         exterior = [(float(x), float(y)) for x, y in pts]
@@ -226,22 +224,24 @@ def render_fast_contour_stl(mask_array, width, height, z_offset, thickness, max_
             poly = Polygon(exterior)
             if not poly.is_valid:
                 poly = poly.buffer(0)
-            if poly.is_empty or poly.area <= 0:
-                continue
-            poly = poly.simplify(0.01, preserve_topology=True)
-            if poly.is_empty or poly.area <= 0:
-                continue
-            mesh = trimesh.creation.extrude_polygon(poly, thickness)
-            if mesh is None or len(mesh.vertices) == 0 or len(mesh.faces) == 0:
-                continue
-            if z_offset:
-                mesh.apply_translation([0, 0, z_offset])
-            meshes.append(mesh)
+            polys = list(poly.geoms) if getattr(poly, 'geom_type', '') == 'MultiPolygon' else [poly]
+            for piece in polys:
+                if piece.is_empty or piece.area <= 0:
+                    continue
+                piece = piece.simplify(0.01, preserve_topology=True)
+                if piece.is_empty or piece.area <= 0:
+                    continue
+                mesh = trimesh.creation.extrude_polygon(piece, thickness)
+                if mesh is None or len(mesh.vertices) == 0 or len(mesh.faces) == 0:
+                    continue
+                if z_offset:
+                    mesh.apply_translation([0, 0, z_offset])
+                meshes.append(mesh)
         except Exception as exc:
             print('fast contour extrusion failed:', exc)
 
     if not meshes:
-        return generate_stl_from_points_fallback(mask_f, width, height, z_offset, thickness)
+        return None
 
     combined = meshes[0] if len(meshes) == 1 else trimesh.util.concatenate(meshes)
     try:
