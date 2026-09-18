@@ -159,11 +159,8 @@ def solidify_foreground_mask(mask_array, closing_size=3):
 
 
 def render_fast_contour_stl(mask_array, width, height, z_offset, thickness, max_dim=256):
-    """Render a fast, smoother STL by extruding simplified outer contours.
-
-    This avoids the expensive spline and repair stack that can timeout on Render.
-    """
-    mask = solidify_foreground_mask(mask_array)
+    """Render a fast STL while preserving interior holes."""
+    mask = np.asarray(mask_array, dtype=bool)
     if not np.any(mask):
         return "solid layer\nendsolid layer\n"
 
@@ -172,20 +169,59 @@ def render_fast_contour_stl(mask_array, width, height, z_offset, thickness, max_
     if max(w, h) > max_dim:
         scale_factor = float(max_dim) / float(max(w, h))
 
+    hole_mask = np.zeros_like(mask, dtype=bool)
+    if np.any(mask):
+        filled_mask = ndimage.binary_fill_holes(mask)
+        hole_mask = filled_mask & (~mask)
+
     if scale_factor != 1.0:
         import skimage.transform as sk_transform
+        resized_shape = (max(1, int(round(h * scale_factor))), max(1, int(round(w * scale_factor))))
         mask = sk_transform.resize(
             mask.astype(float),
-            (max(1, int(round(h * scale_factor))), max(1, int(round(w * scale_factor)))),
+            resized_shape,
             order=1,
             anti_aliasing=True,
             preserve_range=True,
         ) > 0.5
+        if np.any(hole_mask):
+            hole_mask = sk_transform.resize(
+                hole_mask.astype(float),
+                resized_shape,
+                order=0,
+                anti_aliasing=False,
+                preserve_range=True,
+            ) > 0.5
 
-    # Light smoothing before tracing the boundary.
-    mask_f = ndimage.gaussian_filter(mask.astype(float), sigma=0.45)
-    mask_f = np.clip(mask_f, 0.0, 1.0)
-    mask_f = mask_f > 0.5
+    # Light smoothing before tracing the boundary, but keep hole pixels cleared.
+    smooth_field = ndimage.gaussian_filter(mask.astype(float), sigma=0.45)
+    smooth_field = np.clip(smooth_field, 0.0, 1.0)
+    if np.any(hole_mask):
+        smooth_field[hole_mask] = 0.0
+
+    contours = measure.find_contours(smooth_field, 0.5)
+    if not contours:
+        return None
+
+    valid_contours = [c for c in contours if len(c) >= 4 and abs(polygon_area(c)) >= 8.0]
+    if not valid_contours:
+        return None
+
+    valid_sorted = sorted(valid_contours, key=lambda c: abs(polygon_area(c)), reverse=True)
+    assigned_as_hole = [False] * len(valid_sorted)
+    outer_with_holes = []
+
+    for i in range(len(valid_sorted)):
+        if assigned_as_hole[i]:
+            continue
+        holes_for_i = []
+        for j in range(i + 1, len(valid_sorted)):
+            if assigned_as_hole[j]:
+                continue
+            if contour_contains(valid_sorted[i], valid_sorted[j]):
+                assigned_as_hole[j] = True
+                holes_for_i.append(j)
+        outer_with_holes.append((i, holes_for_i))
 
     try:
         import trimesh
@@ -193,39 +229,50 @@ def render_fast_contour_stl(mask_array, width, height, z_offset, thickness, max_
     except Exception:
         return None
 
-    contours = measure.find_contours(mask_f.astype(float), 0.5)
-    if not contours:
-        return None
-
     base_scale_mm = 50.0 / max(width, height)
     xy_scale = base_scale_mm / max(scale_factor, 1e-6)
     meshes = []
 
-    for cnt in contours:
-        if cnt is None or len(cnt) < 4:
-            continue
-        area = abs(polygon_area(cnt))
-        if area < 12:
-            continue
-
-        pts = simplify_contour(cnt, epsilon=0.8)
-        if len(pts) < 3:
-            continue
-        pts = chaikin_smooth(pts, iterations=1)
-        pts = smooth_contour_spline(pts, smoothing=0.002)
-        if len(pts) < 3:
+    for outer_idx, hole_indices in outer_with_holes:
+        outer_raw = valid_sorted[outer_idx]
+        outer_simplified = simplify_contour(outer_raw, epsilon=0.8)
+        outer_simplified = chaikin_smooth(outer_simplified, iterations=1)
+        outer_simplified = smooth_contour_spline(outer_simplified, smoothing=0.002)
+        if len(outer_simplified) < 3:
             continue
 
-        pts = np.asarray(pts, dtype=float)
-        pts[:, 0] = pts[:, 0] * xy_scale
-        pts[:, 1] = pts[:, 1] * xy_scale
-        exterior = [(float(x), float(y)) for x, y in pts]
+        outer_pts = np.asarray(outer_simplified, dtype=float)
+        outer_pts[:, 0] = outer_pts[:, 0] * xy_scale
+        outer_pts[:, 1] = outer_pts[:, 1] * xy_scale
+        outer_pts = ensure_ccw(outer_pts)
+        exterior = [(float(pt[1]), float(pt[0])) for pt in outer_pts]
+
+        holes = []
+        for hi in hole_indices:
+            hole_raw = valid_sorted[hi]
+            hole_simplified = simplify_contour(hole_raw, epsilon=0.8)
+            hole_simplified = chaikin_smooth(hole_simplified, iterations=1)
+            hole_simplified = smooth_contour_spline(hole_simplified, smoothing=0.002)
+            if len(hole_simplified) < 3:
+                continue
+
+            hole_pts = np.asarray(hole_simplified, dtype=float)
+            hole_pts[:, 0] = hole_pts[:, 0] * xy_scale
+            hole_pts[:, 1] = hole_pts[:, 1] * xy_scale
+            hole_pts = ensure_ccw(hole_pts)[::-1]
+            hole_ring = [(float(pt[1]), float(pt[0])) for pt in hole_pts]
+            if len(hole_ring) >= 3:
+                holes.append(hole_ring)
+
         try:
-            poly = Polygon(exterior)
+            poly = Polygon(exterior, holes=holes if holes else None)
             if not poly.is_valid:
                 poly = poly.buffer(0)
-            polys = list(poly.geoms) if getattr(poly, 'geom_type', '') == 'MultiPolygon' else [poly]
-            for piece in polys:
+            if poly.is_empty or poly.area <= 0:
+                continue
+
+            geometries = list(poly.geoms) if getattr(poly, 'geom_type', '') == 'MultiPolygon' else [poly]
+            for piece in geometries:
                 if piece.is_empty or piece.area <= 0:
                     continue
                 piece = piece.simplify(0.01, preserve_topology=True)
@@ -600,7 +647,7 @@ def fast_generate_stl():
         # Extract selected pixels (black/dark areas drawn by user), including
         # dark gray phone-photo areas that are still part of the subject.
         image_array = np.array(image, dtype=np.float32)
-        mask_array = solidify_foreground_mask(build_dark_foreground_mask(image_array, opening_size=2))
+        mask_array = build_dark_foreground_mask(image_array, opening_size=2)
 
         stl_content = render_fast_contour_stl(mask_array, width, height, z_offset=0, thickness=height_mm, max_dim=256)
         if not stl_content:
@@ -958,23 +1005,20 @@ def triangulate_with_holes(outer_verts, hole_verts_list):
     # Build rings array: outer first, then holes
     rings = [outer_verts] + hole_verts_list
 
-    # Build flattened coordinate array for earcut: [x0,y0,x1,y1,...]
-    coords_flat = []
-    hole_start_indices = []
+    # Build coordinate array for earcut: [[x0, y0], [x1, y1], ...]
+    coords_list = []
+    ring_end_indices = []
     vertex_count = 0
     for idx, ring in enumerate(rings):
-        # For holes (idx > 0), record the starting vertex index
-        if idx > 0:
-            hole_start_indices.append(vertex_count)
         for pt in ring:
             # pt is (row=y, col=x) -> earcut wants (x, y)
-            coords_flat.append(float(pt[1]))
-            coords_flat.append(float(pt[0]))
+            coords_list.append([float(pt[1]), float(pt[0])])
         vertex_count += len(ring)
+        ring_end_indices.append(vertex_count)
 
-    coords_np = np.array(coords_flat, dtype=np.float64)
-    if len(hole_start_indices) > 0:
-        holes_np = np.array(hole_start_indices, dtype=np.uint32)
+    coords_np = np.array(coords_list, dtype=np.float64)
+    if len(ring_end_indices) > 1:
+        holes_np = np.array(ring_end_indices, dtype=np.uint32)
     else:
         holes_np = None
 
@@ -1362,7 +1406,7 @@ def generate_stl_from_contours(mask_array, width, height, z_offset, thickness, a
         traceback.print_exc()
         return generate_stl_from_points_fallback(mask_array, width, height, z_offset, thickness)
 
-    if stl_lines.count('facet') == 0:
+    if not any(line.startswith('facet normal') for line in stl_lines):
         print("  No triangles generated")
         return generate_stl_from_points_fallback(mask_array, width, height, z_offset, thickness)
 
