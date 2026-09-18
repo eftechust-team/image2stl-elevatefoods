@@ -145,6 +145,19 @@ def build_dark_foreground_mask(gray_array, opening_size=2):
     return mask
 
 
+def solidify_foreground_mask(mask_array, closing_size=3):
+    """Convert a dark-pixel mask into a filled foreground region.
+
+    This closes small gaps and fills enclosed voids so outline-like selections
+    become solid STLs instead of hollow shells.
+    """
+    mask = np.asarray(mask_array, dtype=bool)
+    if closing_size and closing_size > 1:
+        structure = np.ones((closing_size, closing_size), dtype=bool)
+        mask = ndimage.binary_closing(mask, structure=structure)
+    return ndimage.binary_fill_holes(mask)
+
+
 def sanitize_storage_filename(filename):
     safe_name = re.sub(r'[^A-Za-z0-9._-]+', '_', str(filename or '').strip())
     safe_name = re.sub(r'_+', '_', safe_name).strip('._')
@@ -318,8 +331,7 @@ def process_uploaded_image():
 
 @app.route('/fast_generate_stl', methods=['POST'])
 def fast_generate_stl():
-    """Fast STL generation - creates a proper closed hollow shell from black pixels.
-    Generates top, bottom, and side walls without any filling."""
+    """Fast STL generation - creates a solid STL from the dark pixels."""
     slot_acquired = request_gate.acquire(timeout=2)
     if not slot_acquired:
         return jsonify({'error': 'Server is busy right now. Please try again in a moment.'}), 503
@@ -340,7 +352,7 @@ def fast_generate_stl():
         # Extract selected pixels (black/dark areas drawn by user), including
         # dark gray phone-photo areas that are still part of the subject.
         image_array = np.array(image, dtype=np.float32)
-        mask_array = build_dark_foreground_mask(image_array, opening_size=2)
+        mask_array = solidify_foreground_mask(build_dark_foreground_mask(image_array, opening_size=2))
 
         # Try shapely+trimesh extrusion first (pure-Python), then OpenSCAD, then marching-cubes fallback
         stl_content = None
@@ -545,15 +557,13 @@ def generate_stl():
             width, height = reference_width, reference_height
 
             # Optimized smoothing - skip upsampling here since contour generation handles it
-            # close_size=1 and open_size=1 disable morphological closing/opening which would
-            # fill the inside of hollow/ring-shaped selections.
             if aa_enabled:
                 mask = smooth_binary_mask(image, threshold=edge_threshold, blur_radius=1.5, close_size=1, open_size=1)
             else:
                 mask = smooth_binary_mask(image, threshold=edge_threshold, blur_radius=0, close_size=1, open_size=1)
 
             # Convert PIL image to numpy array
-            mask_array = np.array(mask) > 128
+            mask_array = solidify_foreground_mask(np.array(mask) > 128)
 
             # Generate STL for this layer using grid-based approach (cleaner topology, faster repair)
             z_offset = z_offsets[layer_idx]
@@ -2190,7 +2200,7 @@ def generate_stl_via_shapely(mask_array, width, height, z_offset, thickness, tar
         from shapely.geometry import Polygon, LinearRing
         from shapely.ops import unary_union
         import trimesh
-        from skimage import measure
+        import cv2
     except Exception as e:
         print('shapely/trimesh/skimage not available:', e)
         return None
@@ -2201,37 +2211,35 @@ def generate_stl_via_shapely(mask_array, width, height, z_offset, thickness, tar
     except Exception:
         mask = (mask_array > 0).astype(np.uint8)
 
-    # Find contours (use OpenCV for hierarchy if available, fallback to skimage)
-    contours = None
-    hierarchy = None
-    try:
-        import cv2
-        # cv2 expects 0/255 uint8
-        mask_img = (mask * 255).astype('uint8')
-        cnts, hier = cv2.findContours(mask_img, cv2.RETR_TREE, cv2.CHAIN_APPROX_SIMPLE)
-        contours = cnts
-        hierarchy = hier
-    except Exception:
-        try:
-            contours = measure.find_contours(mask, 0.5)
-            hierarchy = None
-        except Exception as e:
-            print('contour extraction failed:', e)
-            return None
-
+    # We only need the outer shape because the foreground has already been solidified.
+    # Using RETR_EXTERNAL avoids hole hierarchies and produces a simpler mesh.
+    mask_img = (mask * 255).astype('uint8')
+    contours, _ = cv2.findContours(mask_img, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
     if not contours:
         return None
 
-    # Compute bounds
-    if hierarchy is not None:
-        # contours are numpy arrays of shape (N,1,2) in cv2 (x,y)
-        all_pts = np.vstack([c.reshape(-1, 2) for c in contours])
-    else:
-        all_pts = np.vstack(contours)
-    min_x = float(np.min(all_pts[:, 1]))
-    max_x = float(np.max(all_pts[:, 1]))
-    min_y = float(np.min(all_pts[:, 0]))
-    max_y = float(np.max(all_pts[:, 0]))
+    simplified_contours = []
+    all_pts = []
+    for cnt in contours:
+        if cnt is None or len(cnt) < 3:
+            continue
+        perimeter = cv2.arcLength(cnt, True)
+        epsilon = max(1.5, 0.01 * perimeter)
+        approx = cv2.approxPolyDP(cnt, epsilon, True)
+        if approx is None or len(approx) < 3:
+            continue
+        pts = approx.reshape(-1, 2).astype(float)
+        simplified_contours.append(pts)
+        all_pts.append(pts)
+
+    if not simplified_contours:
+        return None
+
+    all_pts = np.vstack(all_pts)
+    min_x = float(np.min(all_pts[:, 0]))
+    max_x = float(np.max(all_pts[:, 0]))
+    min_y = float(np.min(all_pts[:, 1]))
+    max_y = float(np.max(all_pts[:, 1]))
     pixel_width = max_x - min_x
     pixel_height = max_y - min_y
     if pixel_width <= 0 or pixel_height <= 0:
@@ -2240,64 +2248,27 @@ def generate_stl_via_shapely(mask_array, width, height, z_offset, thickness, tar
     scale = float(target_width_mm) / float(pixel_width)
 
     shapely_polys = []
-    if hierarchy is not None:
-        # Build polygons with holes using contour hierarchy from OpenCV
-        hier = hierarchy[0]
-        used = set()
-        for i, cnt in enumerate(contours):
-            if i in used:
+    for pts in simplified_contours:
+        pts = pts.copy()
+        pts[:, 0] = (pts[:, 0] - min_x) * scale
+        pts[:, 1] = (pts[:, 1] - min_y) * scale
+        try:
+            poly = Polygon(pts.tolist())
+            if not poly.is_valid:
+                poly = poly.buffer(0)
+            if poly.is_empty:
                 continue
-            # parent == -1 means outer contour
-            parent = int(hier[i][3])
-            if parent != -1:
-                # skip child contours here; they'll be attached to their parent
+            if abs(poly.area) < 1e-4:
                 continue
-            # collect exterior
-            pts = cnt.reshape(-1, 2).astype(float)
-            # convert cv2 (x,y) to our (x,y) and scale/translate
-            pts[:, 0] = (pts[:, 0] - min_x) * scale
-            pts[:, 1] = (pts[:, 1] - min_y) * scale
-            holes = []
-            # find children
-            child = int(hier[i][2])
-            while child != -1:
-                ch_pts = contours[child].reshape(-1, 2).astype(float)
-                ch_pts[:, 0] = (ch_pts[:, 0] - min_x) * scale
-                ch_pts[:, 1] = (ch_pts[:, 1] - min_y) * scale
-                holes.append(ch_pts.tolist())
-                used.add(child)
-                child = int(hier[child][0])
-
-            try:
-                poly = Polygon(pts.tolist(), holes=holes if holes else None)
-                if not poly.is_valid:
-                    poly = poly.buffer(0)
-                if poly.is_empty:
-                    continue
-                if abs(poly.area) < 1e-4:
-                    continue
-                shapely_polys.append(poly)
-            except Exception:
+            # A small topological simplification makes slicer repair much faster.
+            poly = poly.simplify(0.03, preserve_topology=True)
+            if not poly.is_valid:
+                poly = poly.buffer(0)
+            if poly.is_empty:
                 continue
-    else:
-        # No hierarchy: treat each contour as a polygon and union them
-        for c in contours:
-            if c.shape[0] < 3:
-                continue
-            pts = np.column_stack([c[:, 1], c[:, 0]]).astype(float)
-            pts[:, 0] = (pts[:, 0] - min_x) * scale
-            pts[:, 1] = (pts[:, 1] - min_y) * scale
-            try:
-                poly = Polygon(pts.tolist())
-                if not poly.is_valid:
-                    poly = poly.buffer(0)
-                if poly.is_empty:
-                    continue
-                if abs(poly.area) < 1e-4:
-                    continue
-                shapely_polys.append(poly)
-            except Exception:
-                continue
+            shapely_polys.append(poly)
+        except Exception:
+            continue
 
     if not shapely_polys:
         return None
@@ -2318,104 +2289,36 @@ def generate_stl_via_shapely(mask_array, width, height, z_offset, thickness, tar
         # Unexpected geometry
         return None
 
-    # Rasterize the unified vector geometry at high resolution and run marching-cubes on the raster.
+    # Prefer direct polygon extrusion. This keeps the mesh compact and avoids
+    # the repair-heavy raster fallback that produced thousands of open edges.
     try:
-        from PIL import Image, ImageDraw
-    except Exception:
-        Image = None
-
-    try:
-        # target raster resolution (px across target width)
-        raster_px = 2048
-        target_w_px = raster_px
-        target_h_px = max(64, int(round((pixel_height / float(pixel_width)) * raster_px)))
-
-        if Image is None:
-            # If Pillow is not available, fall back to trimesh extrusion
-            meshes = []
-            for poly in geom_list:
-                try:
-                    m = trimesh.creation.extrude_polygon(poly, thickness)
-                    if m is None or m.vertices.shape[0] == 0:
-                        continue
-                    meshes.append(m)
-                except Exception as e:
-                    print('extrude_polygon failed for poly:', e)
-                    continue
-            if not meshes:
-                return None
-            combined = trimesh.util.concatenate(meshes)
-            if z_offset:
-                combined.apply_translation([0, 0, z_offset])
-            stl_bytes = combined.export(file_type='stl')
-            if isinstance(stl_bytes, bytes):
-                try:
-                    return stl_bytes.decode('utf-8')
-                except Exception:
-                    return combined.export(file_type='stl_ascii')
-            else:
-                return str(stl_bytes)
-
-        # Create white background image and draw filled polygons (black)
-        img = Image.new('L', (target_w_px, target_h_px), 255)
-        draw = ImageDraw.Draw(img)
-
-        # Scale from mm coords (union was created in mm using scale earlier) to pixels
-        sx = target_w_px / float(target_width_mm)
-        sy = target_h_px / (float(pixel_height) * scale / float(pixel_height) if pixel_height != 0 else target_h_px)
-        # Simpler: compute sy same as sx but respect aspect ratio
-        sy = target_h_px / float(target_height_mm) if 'target_height_mm' in locals() else sx
-
-        # Helper to convert coords
-        def to_px_coords(coords):
-            return [(float(x) * sx, float(y) * sy) for (x, y) in coords]
-
+        meshes = []
         for poly in geom_list:
             try:
-                exterior = list(poly.exterior.coords)
-                exterior_px = to_px_coords(exterior)
-                draw.polygon(exterior_px, fill=0)
-                for hole in poly.interiors:
-                    hole_px = to_px_coords(list(hole.coords))
-                    draw.polygon(hole_px, fill=255)
-            except Exception:
+                mesh = trimesh.creation.extrude_polygon(poly, thickness)
+                if mesh is None or len(mesh.vertices) == 0 or len(mesh.faces) == 0:
+                    continue
+                meshes.append(mesh)
+            except Exception as e:
+                print('extrude_polygon failed for poly:', e)
                 continue
 
-        mask_raster = np.array(img)
-        mask_bool = (mask_raster < 128)
-
-        # Run marching cubes on the rasterized mask
-        stl_mc = generate_stl_marching_cubes(mask_bool, target_w_px, target_h_px, z_offset=z_offset, thickness=thickness, max_dim=max(target_w_px, target_h_px))
-        return stl_mc
-    except Exception as e:
-        print('vector->raster->mc failed:', e)
-        # As absolute fallback, try trimesh extrusion
-        try:
-            meshes = []
-            for poly in geom_list:
-                try:
-                    m = trimesh.creation.extrude_polygon(poly, thickness)
-                    if m is None or m.vertices.shape[0] == 0:
-                        continue
-                    meshes.append(m)
-                except Exception as e2:
-                    print('extrude_polygon failed for poly fallback:', e2)
-                    continue
-            if not meshes:
-                return None
+        if meshes:
             combined = trimesh.util.concatenate(meshes)
             if z_offset:
                 combined.apply_translation([0, 0, z_offset])
-            stl_bytes = combined.export(file_type='stl')
-            if isinstance(stl_bytes, bytes):
-                try:
-                    return stl_bytes.decode('utf-8')
-                except Exception:
-                    return combined.export(file_type='stl_ascii')
-            else:
+            if getattr(combined, 'is_watertight', False):
+                stl_bytes = combined.export(file_type='stl')
+                if isinstance(stl_bytes, bytes):
+                    try:
+                        return stl_bytes.decode('utf-8')
+                    except Exception:
+                        return combined.export(file_type='stl_ascii')
                 return str(stl_bytes)
-        except Exception:
-            return None
+    except Exception as e:
+        print('direct extrusion failed:', e)
+
+    return None
 
 if __name__ == '__main__':
     app.run(debug=os.getenv('FLASK_DEBUG', '').lower() in ('1', 'true', 'yes'), host='0.0.0.0', port=8080)
