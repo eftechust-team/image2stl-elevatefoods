@@ -235,9 +235,7 @@ def render_fast_contour_stl(mask_array, width, height, z_offset, thickness, max_
 
     for outer_idx, hole_indices in outer_with_holes:
         outer_raw = valid_sorted[outer_idx]
-        outer_simplified = simplify_contour(outer_raw, epsilon=0.8)
-        outer_simplified = chaikin_smooth(outer_simplified, iterations=1)
-        outer_simplified = smooth_contour_spline(outer_simplified, smoothing=0.002)
+        outer_simplified = simplify_contour(outer_raw, epsilon=0.55)
         if len(outer_simplified) < 3:
             continue
 
@@ -245,14 +243,13 @@ def render_fast_contour_stl(mask_array, width, height, z_offset, thickness, max_
         outer_pts[:, 0] = outer_pts[:, 0] * xy_scale
         outer_pts[:, 1] = outer_pts[:, 1] * xy_scale
         outer_pts = ensure_ccw(outer_pts)
+        outer_pts = close_contour_ring(outer_pts)
         exterior = [(float(pt[1]), float(pt[0])) for pt in outer_pts]
 
         holes = []
         for hi in hole_indices:
             hole_raw = valid_sorted[hi]
-            hole_simplified = simplify_contour(hole_raw, epsilon=0.8)
-            hole_simplified = chaikin_smooth(hole_simplified, iterations=1)
-            hole_simplified = smooth_contour_spline(hole_simplified, smoothing=0.002)
+            hole_simplified = simplify_contour(hole_raw, epsilon=0.55)
             if len(hole_simplified) < 3:
                 continue
 
@@ -260,6 +257,7 @@ def render_fast_contour_stl(mask_array, width, height, z_offset, thickness, max_
             hole_pts[:, 0] = hole_pts[:, 0] * xy_scale
             hole_pts[:, 1] = hole_pts[:, 1] * xy_scale
             hole_pts = ensure_ccw(hole_pts)[::-1]
+            hole_pts = close_contour_ring(hole_pts)
             hole_ring = [(float(pt[1]), float(pt[0])) for pt in hole_pts]
             if len(hole_ring) >= 3:
                 holes.append(hole_ring)
@@ -993,6 +991,16 @@ def contour_contains(outer, inner):
     # Test a few points from the inner contour against the outer polygon
     test_pts = inner[::max(1, len(inner) // 5)][:5]
     return all(point_in_polygon(pt, outer) for pt in test_pts)
+
+
+def close_contour_ring(points):
+    """Return a closed contour ring suitable for shapely extrusion."""
+    ring = np.asarray(points, dtype=float)
+    if len(ring) < 3:
+        return ring
+    if np.linalg.norm(ring[0] - ring[-1]) > 1e-6:
+        ring = np.vstack([ring, ring[0]])
+    return ring
 
 
 def triangulate_with_holes(outer_verts, hole_verts_list):
