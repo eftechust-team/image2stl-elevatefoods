@@ -158,6 +158,69 @@ def solidify_foreground_mask(mask_array, closing_size=3):
     return ndimage.binary_fill_holes(mask)
 
 
+def _render_mask_as_smooth_stl(mask_array, width, height, z_offset, thickness, max_dim=512, xy_upsample=2, surface_blur=0.85):
+    """Render a binary foreground mask as a padded smooth volume and export an STL.
+
+    This favors watertight output and softer edges over contour-by-contour extrusion.
+    """
+    if not np.any(mask_array):
+        return "solid layer\nendsolid layer\n"
+
+    mask = np.asarray(mask_array, dtype=bool)
+    h, w = mask.shape
+
+    # Keep the problem size bounded, but slightly upsample smaller inputs so the
+    # block mesh follows a smoother silhouette than the raw pixel grid.
+    scale_factor = 1.0
+    target_max_dim = max(64, int(max_dim))
+    if max(w, h) > target_max_dim:
+        scale_factor = float(target_max_dim) / float(max(w, h))
+    elif max(w, h) < target_max_dim and xy_upsample > 1:
+        scale_factor = min(float(xy_upsample), float(target_max_dim) / float(max(w, h)))
+
+    if scale_factor != 1.0:
+        import skimage.transform as sk_transform
+        resized = sk_transform.resize(
+            mask.astype(float),
+            (max(1, int(round(h * scale_factor))), max(1, int(round(w * scale_factor)))),
+            order=1,
+            anti_aliasing=True,
+            preserve_range=True,
+        )
+        mask_field = np.clip(resized, 0.0, 1.0)
+    else:
+        mask_field = mask.astype(float)
+
+    # A light blur creates smoother walls and removes the staircase effect.
+    if surface_blur and surface_blur > 0:
+        mask_field = ndimage.gaussian_filter(mask_field, sigma=float(surface_blur))
+        mask_field = np.clip(mask_field, 0.0, 1.0)
+
+    # Solidify again after smoothing so we do not create tiny voids.
+    mask_field = solidify_foreground_mask(mask_field > 0.5)
+    hs, ws = mask_field.shape
+
+    # Convert the smoothed mask into points and let the block-mesh generator
+    # emit only the exterior faces. This is slower than pure contour extrusion,
+    # but much more robust and still significantly smoother than the raw grid.
+    points = [(int(x), int(y)) for y, x in np.argwhere(mask_field)]
+    if not points:
+        return "solid layer\nendsolid layer\n"
+
+    base_scale_mm = 50.0 / max(width, height)
+    xy_scale = base_scale_mm / max(scale_factor, 1e-6)
+    return generate_stl_from_points(
+        points,
+        ws,
+        hs,
+        z_offset,
+        thickness,
+        dilation=1,
+        block_size=2,
+        scale=xy_scale,
+    )
+
+
 def sanitize_storage_filename(filename):
     safe_name = re.sub(r'[^A-Za-z0-9._-]+', '_', str(filename or '').strip())
     safe_name = re.sub(r'_+', '_', safe_name).strip('._')
@@ -354,12 +417,18 @@ def fast_generate_stl():
         image_array = np.array(image, dtype=np.float32)
         mask_array = solidify_foreground_mask(build_dark_foreground_mask(image_array, opening_size=2))
 
-        # Try shapely+trimesh extrusion first (pure-Python), then OpenSCAD, then marching-cubes fallback
+        # Try the validated block-mesh path first, then fallback to the heavier wrapper methods.
         stl_content = None
         try:
-            stl_content = generate_stl_via_shapely(mask_array, width, height, z_offset=0, thickness=height_mm, target_width_mm=50.0)
+            stl_content = generate_stl_marching_cubes(mask_array, width, height, z_offset=0, thickness=height_mm, max_dim=256)
         except Exception as e:
-            print('generate_stl_via_shapely failed:', e)
+            print('generate_stl_marching_cubes failed:', e)
+
+        if not stl_content:
+            try:
+                stl_content = generate_stl_via_shapely(mask_array, width, height, z_offset=0, thickness=height_mm, target_width_mm=50.0)
+            except Exception as e:
+                print('generate_stl_via_shapely failed:', e)
 
         if not stl_content:
             try:
@@ -368,7 +437,7 @@ def fast_generate_stl():
                 print('generate_stl_via_openscad failed:', e)
 
         if not stl_content:
-            # Fallback to marching cubes-based generator (watertight voxel extrusion)
+            # Final fallback to the same block-mesh renderer with a larger budget.
             stl_content = generate_stl_marching_cubes(
                 mask_array,
                 width,
@@ -1941,107 +2010,8 @@ def create_triangle(v1, v2, v3):
 
 
 def generate_stl_marching_cubes(mask_array, width, height, z_offset, thickness, max_dim=512):
-    """Generate a watertight STL by extruding the 2D mask into a 3D voxel volume
-    and running marching cubes. This produces manifold geometry and consistent
-    normals, avoiding earcut/triangulation edge mismatches.
-    """
-    # If mask empty
-    if not np.any(mask_array):
-        return "solid layer\nendsolid layer\n"
-
-    # Downscale if very large to keep marching cubes manageable
-    h, w = mask_array.shape
-    scale_factor = 1.0
-    if max(w, h) > max_dim:
-        scale_factor = float(max_dim) / float(max(w, h))
-        import skimage.transform as sk_transform
-        mask_small = sk_transform.resize(mask_array.astype(float), (
-            int(round(h * scale_factor)), int(round(w * scale_factor))
-        ), order=0, preserve_range=True) > 0.5
-    else:
-        mask_small = mask_array.astype(bool)
-
-    hs, ws = mask_small.shape
-
-    # Depth resolution: aim for ~2 voxels per mm of thickness
-    try:
-        depth = max(4, min(64, int(round(thickness * 2))))
-    except Exception:
-        depth = 10
-
-    # Build 3D volume with axes (z, y, x)
-    vol = np.zeros((depth, hs, ws), dtype=np.uint8)
-    for z in range(depth):
-        vol[z, :, :] = mask_small
-
-    # Smooth volume slightly to avoid aliasing artifacts
-    vol_float = vol.astype(float)
-    vol_float = ndimage.gaussian_filter(vol_float, sigma=(0.5, 0.5, 0.5))
-
-    # Run marching cubes at level 0.5
-    try:
-        verts, faces, normals, values = measure.marching_cubes(vol_float, level=0.5, spacing=(thickness / depth, 1.0, 1.0))
-    except Exception as e:
-        print(f"marching_cubes failed: {e}")
-        return generate_stl_from_grid(mask_array, width, height, z_offset, thickness)
-
-    # verts are in (z, y, x) coordinates per spacing above
-    # Map to mm-space: x_mm = x * scale_mm, y_mm = (height_pixels - y_scaled) * scale_mm, z_mm = z + z_offset
-    # Compute XY pixel-to-mm scale from original size (we used optional downscale)
-    scale_mm = 50.0 / max(width, height)
-    # If we downscaled, adjust x/y coordinates
-    if scale_factor != 1.0:
-        inv_sf = 1.0 / scale_factor
-    else:
-        inv_sf = 1.0
-
-    stl_lines = ["solid layer\n"]
-
-    for f in faces:
-        i0, i1, i2 = int(f[0]), int(f[1]), int(f[2])
-        v0 = verts[i0]
-        v1 = verts[i1]
-        v2 = verts[i2]
-
-        # verts: [z, y, x]
-        def to_mm(v):
-            z_vox, y_pix, x_pix = v
-            x_mm = float(x_pix) * inv_sf * scale_mm
-            y_mm = float((hs - y_pix - 1)) * inv_sf * scale_mm
-            z_mm = float(z_vox) + z_offset
-            # convert z voxel units to mm: spacing used thickness/depth
-            z_mm = z_mm * (thickness / depth)
-            return [x_mm, y_mm, z_mm]
-
-        vv0 = to_mm(v0)
-        vv1 = to_mm(v1)
-        vv2 = to_mm(v2)
-
-        # Use given normals for orientation; ensure triangle winding matches normal
-        nx, ny, nz = normals[i0]
-        # Compute triangle normal to test orientation
-        ax = vv1[0] - vv0[0]
-        ay = vv1[1] - vv0[1]
-        az = vv1[2] - vv0[2]
-        bx = vv2[0] - vv0[0]
-        by = vv2[1] - vv0[1]
-        bz = vv2[2] - vv0[2]
-        cx = ay * bz - az * by
-        cy = az * bx - ax * bz
-        cz = ax * by - ay * bx
-        # Dot with provided normal to check sign
-        dot = cx * nx + cy * ny + cz * nz
-        if dot < 0:
-            # flip winding
-            tri = create_triangle(vv0, vv2, vv1)
-        else:
-            tri = create_triangle(vv0, vv1, vv2)
-
-        if tri:
-            stl_lines.append(tri)
-
-    stl_lines.append("endsolid layer\n")
-    return ''.join(stl_lines)
+    """Generate a watertight STL from the mask using a padded smooth volume."""
+    return _render_mask_as_smooth_stl(mask_array, width, height, z_offset, thickness, max_dim=max_dim, xy_upsample=2, surface_blur=0.85)
 
 
 def generate_stl_via_openscad(mask_array, width, height, z_offset, thickness, target_width_mm=50.0):
@@ -2193,132 +2163,12 @@ import("{svg_path.as_posix()}", center = false);
 
 
 def generate_stl_via_shapely(mask_array, width, height, z_offset, thickness, target_width_mm=50.0):
-    """Generate STL using shapely + trimesh (pure Python). Combines contours into
-    a single polygon (or multipolygon) and extrudes using trimesh. Returns ASCII STL string or None.
-    """
+    """Generate STL from the mask using the same smooth watertight volume pipeline."""
     try:
-        from shapely.geometry import Polygon, LinearRing
-        from shapely.ops import unary_union
-        import trimesh
-        import cv2
-    except Exception as e:
-        print('shapely/trimesh/skimage not available:', e)
-        return None
-
-    # Ensure mask is boolean
-    try:
-        mask = (mask_array.astype(bool)).astype(np.uint8)
+        max_dim = 256 if max(width, height) <= 512 else 512
     except Exception:
-        mask = (mask_array > 0).astype(np.uint8)
-
-    # We only need the outer shape because the foreground has already been solidified.
-    # Using RETR_EXTERNAL avoids hole hierarchies and produces a simpler mesh.
-    mask_img = (mask * 255).astype('uint8')
-    contours, _ = cv2.findContours(mask_img, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
-    if not contours:
-        return None
-
-    simplified_contours = []
-    all_pts = []
-    for cnt in contours:
-        if cnt is None or len(cnt) < 3:
-            continue
-        perimeter = cv2.arcLength(cnt, True)
-        epsilon = max(1.5, 0.01 * perimeter)
-        approx = cv2.approxPolyDP(cnt, epsilon, True)
-        if approx is None or len(approx) < 3:
-            continue
-        pts = approx.reshape(-1, 2).astype(float)
-        simplified_contours.append(pts)
-        all_pts.append(pts)
-
-    if not simplified_contours:
-        return None
-
-    all_pts = np.vstack(all_pts)
-    min_x = float(np.min(all_pts[:, 0]))
-    max_x = float(np.max(all_pts[:, 0]))
-    min_y = float(np.min(all_pts[:, 1]))
-    max_y = float(np.max(all_pts[:, 1]))
-    pixel_width = max_x - min_x
-    pixel_height = max_y - min_y
-    if pixel_width <= 0 or pixel_height <= 0:
-        return None
-
-    scale = float(target_width_mm) / float(pixel_width)
-
-    shapely_polys = []
-    for pts in simplified_contours:
-        pts = pts.copy()
-        pts[:, 0] = (pts[:, 0] - min_x) * scale
-        pts[:, 1] = (pts[:, 1] - min_y) * scale
-        try:
-            poly = Polygon(pts.tolist())
-            if not poly.is_valid:
-                poly = poly.buffer(0)
-            if poly.is_empty:
-                continue
-            if abs(poly.area) < 1e-4:
-                continue
-            # A small topological simplification makes slicer repair much faster.
-            poly = poly.simplify(0.03, preserve_topology=True)
-            if not poly.is_valid:
-                poly = poly.buffer(0)
-            if poly.is_empty:
-                continue
-            shapely_polys.append(poly)
-        except Exception:
-            continue
-
-    if not shapely_polys:
-        return None
-
-    try:
-        union = unary_union(shapely_polys)
-    except Exception as e:
-        print('unary_union failed:', e)
-        return None
-
-    # Ensure we have polygon(s)
-    geom_list = []
-    if union.geom_type == 'Polygon':
-        geom_list = [union]
-    elif union.geom_type == 'MultiPolygon':
-        geom_list = list(union.geoms)
-    else:
-        # Unexpected geometry
-        return None
-
-    # Prefer direct polygon extrusion. This keeps the mesh compact and avoids
-    # the repair-heavy raster fallback that produced thousands of open edges.
-    try:
-        meshes = []
-        for poly in geom_list:
-            try:
-                mesh = trimesh.creation.extrude_polygon(poly, thickness)
-                if mesh is None or len(mesh.vertices) == 0 or len(mesh.faces) == 0:
-                    continue
-                meshes.append(mesh)
-            except Exception as e:
-                print('extrude_polygon failed for poly:', e)
-                continue
-
-        if meshes:
-            combined = trimesh.util.concatenate(meshes)
-            if z_offset:
-                combined.apply_translation([0, 0, z_offset])
-            if getattr(combined, 'is_watertight', False):
-                stl_bytes = combined.export(file_type='stl')
-                if isinstance(stl_bytes, bytes):
-                    try:
-                        return stl_bytes.decode('utf-8')
-                    except Exception:
-                        return combined.export(file_type='stl_ascii')
-                return str(stl_bytes)
-    except Exception as e:
-        print('direct extrusion failed:', e)
-
-    return None
+        max_dim = 512
+    return _render_mask_as_smooth_stl(mask_array, width, height, z_offset, thickness, max_dim=max_dim, xy_upsample=2, surface_blur=0.75)
 
 if __name__ == '__main__':
     app.run(debug=os.getenv('FLASK_DEBUG', '').lower() in ('1', 'true', 'yes'), host='0.0.0.0', port=8080)
