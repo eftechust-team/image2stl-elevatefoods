@@ -158,6 +158,107 @@ def solidify_foreground_mask(mask_array, closing_size=3):
     return ndimage.binary_fill_holes(mask)
 
 
+def render_fast_contour_stl(mask_array, width, height, z_offset, thickness, max_dim=256):
+    """Render a fast, smoother STL by extruding simplified outer contours.
+
+    This avoids the expensive spline and repair stack that can timeout on Render.
+    """
+    mask = solidify_foreground_mask(mask_array)
+    if not np.any(mask):
+        return "solid layer\nendsolid layer\n"
+
+    h, w = mask.shape
+    scale_factor = 1.0
+    if max(w, h) > max_dim:
+        scale_factor = float(max_dim) / float(max(w, h))
+
+    if scale_factor != 1.0:
+        import skimage.transform as sk_transform
+        mask = sk_transform.resize(
+            mask.astype(float),
+            (max(1, int(round(h * scale_factor))), max(1, int(round(w * scale_factor)))),
+            order=1,
+            anti_aliasing=True,
+            preserve_range=True,
+        ) > 0.5
+
+    # Light smoothing before tracing the boundary.
+    mask_f = ndimage.gaussian_filter(mask.astype(float), sigma=0.45)
+    mask_f = np.clip(mask_f, 0.0, 1.0)
+    mask_f = mask_f > 0.5
+
+    try:
+        import cv2
+        import trimesh
+        from shapely.geometry import Polygon
+    except Exception:
+        cv2 = None
+        trimesh = None
+        Polygon = None
+
+    if cv2 is None or trimesh is None or Polygon is None:
+        return generate_stl_from_points_fallback(mask_f, width, height, z_offset, thickness)
+
+    mask_img = (mask_f.astype(np.uint8) * 255)
+    contours, _ = cv2.findContours(mask_img, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+    if not contours:
+        return generate_stl_from_points_fallback(mask_f, width, height, z_offset, thickness)
+
+    base_scale_mm = 50.0 / max(width, height)
+    xy_scale = base_scale_mm / max(scale_factor, 1e-6)
+    meshes = []
+
+    for cnt in contours:
+        area = abs(cv2.contourArea(cnt))
+        if area < 12:
+            continue
+        perimeter = cv2.arcLength(cnt, True)
+        epsilon = max(1.0, 0.01 * perimeter)
+        approx = cv2.approxPolyDP(cnt, epsilon, True)
+        if approx is None or len(approx) < 3:
+            continue
+
+        pts = approx.reshape(-1, 2).astype(float)
+        pts[:, 0] = pts[:, 0] * xy_scale
+        pts[:, 1] = pts[:, 1] * xy_scale
+        exterior = [(float(x), float(y)) for x, y in pts]
+        try:
+            poly = Polygon(exterior)
+            if not poly.is_valid:
+                poly = poly.buffer(0)
+            if poly.is_empty or poly.area <= 0:
+                continue
+            poly = poly.simplify(0.01, preserve_topology=True)
+            if poly.is_empty or poly.area <= 0:
+                continue
+            mesh = trimesh.creation.extrude_polygon(poly, thickness)
+            if mesh is None or len(mesh.vertices) == 0 or len(mesh.faces) == 0:
+                continue
+            if z_offset:
+                mesh.apply_translation([0, 0, z_offset])
+            meshes.append(mesh)
+        except Exception as exc:
+            print('fast contour extrusion failed:', exc)
+
+    if not meshes:
+        return generate_stl_from_points_fallback(mask_f, width, height, z_offset, thickness)
+
+    combined = meshes[0] if len(meshes) == 1 else trimesh.util.concatenate(meshes)
+    try:
+        combined.process(validate=True)
+    except Exception:
+        pass
+    try:
+        combined.fill_holes()
+    except Exception:
+        pass
+
+    stl_bytes = combined.export(file_type='stl_ascii')
+    if isinstance(stl_bytes, bytes):
+        return stl_bytes.decode('utf-8', errors='ignore')
+    return str(stl_bytes)
+
+
 def _build_smooth_polygon_mesh(mask_array, width, height, z_offset, thickness, max_dim=512, xy_upsample=2, surface_blur=0.75):
     """Convert a binary mask into a smooth watertight STL by extracting contours,
     smoothing them, and extruding polygons directly.
@@ -500,6 +601,36 @@ def fast_generate_stl():
         # dark gray phone-photo areas that are still part of the subject.
         image_array = np.array(image, dtype=np.float32)
         mask_array = solidify_foreground_mask(build_dark_foreground_mask(image_array, opening_size=2))
+
+        stl_content = render_fast_contour_stl(mask_array, width, height, z_offset=0, thickness=height_mm, max_dim=256)
+        if not stl_content:
+            return jsonify({'error': 'Fast generation failed. Please try a simpler image.'}), 500
+
+        download_name = sanitize_storage_filename(data.get('download_name') or 'model.stl')
+        supabase_uploads = []
+        supabase_error = None
+        try:
+            supabase_uploads = upload_generated_files_to_supabase([
+                {
+                    'filename': download_name,
+                    'payload': stl_content.encode('utf-8'),
+                    'content_type': 'model/stl'
+                }
+            ], 'fast-generate')
+        except Exception as upload_exc:
+            supabase_error = str(upload_exc)
+
+        stl_b64 = base64.b64encode(stl_content.encode('utf-8')).decode('utf-8')
+
+        response_payload = {
+            'stl_file': stl_b64,
+            'supabase_upload_enabled': is_supabase_upload_enabled(),
+            'uploaded_files': supabase_uploads
+        }
+        if supabase_error:
+            response_payload['supabase_upload_error'] = supabase_error
+
+        return jsonify(response_payload)
 
         # Try the validated block-mesh path first, then fallback to the heavier wrapper methods.
         stl_content = None
